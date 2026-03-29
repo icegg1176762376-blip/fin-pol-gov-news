@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3 scripts/sanitize-html.py --input tests/test_tables.md --output /tmp/test_output.html --verbose)",
+      "Bash(python scripts/sanitize-html.py --input tests/test_tables.md --output /tmp/test_output.html --verbose)",
+      "Bash(where python:*)",
+      "Bash(where py:*)",
+      "Bash(\"D:\\\\Program Files\\\\python\\\\python.exe\" scripts/sanitize-html.py --input tests/test_tables.md --output /tmp/test_output.html --verbose)",
+      "Bash(\"D:\\\\Program Files\\\\python\\\\python.exe\" -m py_compile scripts/generate-report.py)"
+    ]
+  }
+}

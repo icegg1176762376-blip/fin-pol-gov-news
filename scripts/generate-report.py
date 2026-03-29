@@ -1,0 +1,484 @@
+#!/usr/bin/env python3
+"""
+Generate detailed markdown report from merged JSON data.
+
+Reads merged pipeline output and generates a comprehensive report with:
+- Full metadata (publish date, source, links)
+- Detailed summaries
+- Proper categorization by region/agency
+- Statistics overview
+
+Usage:
+    python3 generate-report.py --input /tmp/fin-pol-merged.json --output /tmp/report.md [--verbose]
+"""
+
+import argparse
+import json
+import logging
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Dict, List, Any, Optional
+from collections import defaultdict
+
+
+# Source categories mapping
+SOURCE_CATEGORIES = {
+    # Shenzhen
+    'sz.gov.cn': {'region': '深圳', 'agency': '市政府'},
+    'szft.gov.cn': {'region': '深圳', 'agency': '发改委'},
+    'szfb.gov.cn': {'region': '深圳', 'agency': '财政局'},
+    # Beijing
+    'beijing.gov.cn': {'region': '北京', 'agency': '市政府'},
+    'fgw.beijing.gov.cn': {'region': '北京', 'agency': '发改委'},
+    # Guangdong
+    'gd.gov.cn': {'region': '广东', 'agency': '省政府'},
+    'gdrd.gd.gov.cn': {'region': '广东', 'agency': '发改委'},
+    # Financial regulators
+    'pbc.gov.cn': {'region': '金融监管', 'agency': '人民银行'},
+    'nfra.gov.cn': {'region': '金融监管', 'agency': '金融监管总局'},
+    'cbirc.gov.cn': {'region': '金融监管', 'agency': '金融监管总局'},
+    'csrc.gov.cn': {'region': '金融监管', 'agency': '证监会'},
+    # Xuexi Qiangguo
+    'xuexi.cn': {'region': '学习强国', 'agency': '学习平台'},
+}
+
+
+def categorize_article(article: Dict[str, Any]) -> Dict[str, str]:
+    """Categorize article by region and agency based on URL."""
+    url = article.get('link', '')
+    source_name = article.get('source', '')
+
+    # Check URL patterns
+    for domain, info in SOURCE_CATEGORIES.items():
+        if domain in url:
+            return {'region': info['region'], 'agency': info['agency']}
+
+    # Check source name
+    for domain, info in SOURCE_CATEGORIES.items():
+        if domain in source_name:
+            return {'region': info['region'], 'agency': info['agency']}
+
+    # Default categorization by source name patterns
+    if '学习强国' in source_name or 'xuexi' in url.lower() or 'xuexi' in source_name.lower():
+        return {'region': '学习强国', 'agency': '学习平台'}
+    if '证监会' in source_name or 'csrc' in url.lower():
+        return {'region': '金融监管', 'agency': '证监会'}
+    if '央行' in source_name or '人民银行' in source_name:
+        return {'region': '金融监管', 'agency': '人民银行'}
+    if '金监' in source_name or '银保' in source_name:
+        return {'region': '金融监管', 'agency': '金融监管总局'}
+    if '深圳' in source_name or 'sz' in url.lower():
+        return {'region': '深圳', 'agency': '市政府'}
+    if '北京' in source_name or 'beijing' in url.lower():
+        return {'region': '北京', 'agency': '市政府'}
+    if '广东' in source_name or 'gd' in url.lower():
+        return {'region': '广东', 'agency': '省政府'}
+
+    return {'region': '其他', 'agency': '未知'}
+
+
+def get_article_type(article: Dict[str, Any]) -> str:
+    """Determine article type (政策文件/项目动态/监管通知/政策解读/其他)."""
+    title = article.get('title', '')
+    content = (article.get('content') or article.get('summary') or '')
+    source_name = article.get('source', '')
+
+    # Check if this is from Xuexi Qiangguo
+    if '学习强国' in source_name or 'xuexi' in source_name.lower():
+        title_lower = title.lower()
+        content_lower = content.lower()
+
+        # Xuexi-specific types
+        if '解读' in title or '解读' in content:
+            return '政策解读'
+        if '讲话' in title or '精神' in title:
+            return '重要讲话'
+        if '改革' in title or '发展' in title:
+            return '改革发展'
+        return '时政新闻'
+
+    title_lower = title.lower()
+    content_lower = content.lower()
+
+    # Policy indicators
+    policy_keywords = ['政策', '办法', '规定', '条例', '通知', '意见', '方案',
+                       '指引', '实施细则', '发布', '印发', '征求意见']
+
+    # Project indicators
+    project_keywords = ['招标', '采购', '公示', '项目', '中标', '成交',
+                       '预算', '公告', '资格预审']
+
+    # Regulatory indicators
+    regulatory_keywords = ['监管', '处罚', '罚单', '警示', '风险', '合规']
+
+    for keyword in regulatory_keywords:
+        if keyword in title_lower or keyword in content_lower:
+            return '监管通知'
+
+    for keyword in project_keywords:
+        if keyword in title_lower or keyword in content_lower:
+            return '项目动态'
+
+    for keyword in policy_keywords:
+        if keyword in title_lower:
+            return '政策文件'
+
+    return '其他'
+
+
+def format_date(iso_date: str) -> str:
+    """Format ISO date string to readable format."""
+    try:
+        dt = datetime.fromisoformat(iso_date.replace('Z', '+00:00'))
+        return dt.strftime('%Y-%m-%d %H:%M')
+    except Exception:
+        return iso_date[:19]
+
+
+def truncate_text(text: str, max_len: int = 200) -> str:
+    """Truncate text to max length, adding ellipsis if needed."""
+    if not text:
+        return ''
+    text = text.strip()
+    if len(text) <= max_len:
+        return text
+    return text[:max_len].rsplit('，', 1)[0].rsplit('。', 1)[0] + '...'
+
+
+def strip_html_tags(html: str) -> str:
+    """Remove HTML tags from content."""
+    import re
+    if not html:
+        return ''
+    # Remove HTML tags
+    text = re.sub(r'<[^>]+>', '', html)
+    # Remove extra whitespace
+    text = ' '.join(text.split())
+    return text[:500]
+
+
+class ReportGenerator:
+    """Generate detailed markdown report."""
+
+    def __init__(self, data: Dict[str, Any]):
+        self.data = data
+        self.articles = self._extract_articles()
+        self.categorized = self._categorize_articles()
+        self.stats = self._calculate_stats()
+
+    def _extract_articles(self) -> List[Dict[str, Any]]:
+        """Extract all articles from merged data."""
+        articles = []
+
+        # Handle different data structures
+        if 'articles' in self.data:
+            articles = self.data['articles']
+        elif 'topics' in self.data:
+            for topic_data in self.data['topics'].values():
+                if isinstance(topic_data, dict) and 'articles' in topic_data:
+                    articles.extend(topic_data['articles'])
+        elif 'sources' in self.data:
+            for source in self.data['sources']:
+                if isinstance(source, dict) and 'articles' in source:
+                    articles.extend(source['articles'])
+
+        return articles
+
+    def _categorize_articles(self) -> Dict[str, Dict[str, List[Dict[str, Any]]]]:
+        """Categorize articles by region and type."""
+        categorized = defaultdict(lambda: defaultdict(list))
+
+        for article in self.articles:
+            if not isinstance(article, dict):
+                continue
+
+            cat = categorize_article(article)
+            article_type = get_article_type(article)
+
+            # Add metadata
+            article['_region'] = cat['region']
+            article['_agency'] = cat['agency']
+            article['_type'] = article_type
+
+            categorized[cat['region']][article_type].append(article)
+
+        return dict(categorized)
+
+    def _calculate_stats(self) -> Dict[str, Any]:
+        """Calculate statistics for the report."""
+        stats = {
+            'total': len(self.articles),
+            'by_region': defaultdict(lambda: defaultdict(int)),
+            'by_type': defaultdict(int),
+        }
+
+        for region, types in self.categorized.items():
+            for article_type, articles in types.items():
+                stats['by_region'][region][article_type] = len(articles)
+                stats['by_type'][article_type] += len(articles)
+
+        return stats
+
+    def generate(self) -> str:
+        """Generate the complete markdown report."""
+        lines = []
+
+        # Header
+        lines.extend(self._generate_header())
+        lines.append('')
+
+        # Stats table
+        lines.extend(self._generate_stats_table())
+        lines.append('')
+
+        # Top articles
+        lines.extend(self._generate_top_articles())
+        lines.append('')
+
+        # Regional sections
+        region_order = ['深圳', '北京', '广东', '金融监管', '学习强国', '其他']
+        for region in region_order:
+            if region in self.categorized:
+                lines.extend(self._generate_region_section(region))
+                lines.append('')
+
+        # Footer
+        lines.extend(self._generate_footer())
+
+        return '\n'.join(lines)
+
+    def _generate_header(self) -> List[str]:
+        """Generate report header."""
+        now = datetime.now(timezone.utc)
+        date_str = now.strftime('%Y年%m月%d日')
+        time_str = now.strftime('%H:%M')
+
+        return [
+            '# 金融政策日报 | Policy & Finance Daily',
+            '',
+            f'**日期**: {date_str} | **生成时间**: {time_str} | **覆盖范围**: 近48小时',
+        ]
+
+    def _generate_stats_table(self) -> List[str]:
+        """Generate statistics overview table."""
+        lines = [
+            '## 📊 数据概览',
+            '',
+            '| 地区/机构 | 政策文件 | 项目动态 | 监管通知 | 其他 | 合计 |',
+            '| :--- | :---: | :---: | :---: | :---: | :---: |',
+        ]
+
+        region_order = ['深圳', '北京', '广东', '金融监管', '学习强国', '其他']
+        grand_total = 0
+
+        for region in region_order:
+            if region not in self.stats['by_region']:
+                continue
+
+            region_stats = self.stats['by_region'][region]
+            policy = region_stats.get('政策文件', 0)
+            project = region_stats.get('项目动态', 0)
+            regulatory = region_stats.get('监管通知', 0)
+            other = region_stats.get('其他', 0)
+            total = sum([policy, project, regulatory, other])
+            grand_total += total
+
+            # Region emoji
+            emoji = {
+                '深圳': '🏙️',
+                '北京': '🏛️',
+                '广东': '🌏',
+                '金融监管': '🏦',
+                '其他': '📋',
+            }.get(region, '')
+
+            lines.append(f'| {emoji} {region} | {policy} | {project} | {regulatory} | {other} | **{total}** |')
+
+        # Total row
+        total_policy = self.stats['by_type'].get('政策文件', 0)
+        total_project = self.stats['by_type'].get('项目动态', 0)
+        total_regulatory = self.stats['by_type'].get('监管通知', 0)
+        total_other = self.stats['by_type'].get('其他', 0)
+
+        lines.append(f'| **总计** | **{total_policy}** | **{total_project}** | **{total_regulatory}** | **{total_other}** | **{grand_total}** |')
+
+        return lines
+
+    def _generate_top_articles(self) -> List[str]:
+        """Generate top 5 articles section."""
+        # Sort by quality score or recency
+        scored_articles = []
+        for article in self.articles:
+            if not isinstance(article, dict):
+                continue
+            score = article.get('quality_score', 0)
+            # Use published date as secondary sort
+            published = article.get('published', '')
+            scored_articles.append((score, published, article))
+
+        scored_articles.sort(key=lambda x: (x[0], x[1]), reverse=True)
+        top_articles = [a for _, _, a in scored_articles[:5]]
+
+        lines = [
+            '## 🔥 核心焦点 (Top 5)',
+            '',
+            '| 排名 | 标题 | 来源 | 类型 | 发布时间 | 摘要 |',
+            '| :--- | :--- | :--- | :--- | :--- | :--- |',
+        ]
+
+        for i, article in enumerate(top_articles, 1):
+            title = escape_md_table(article.get('title', ''))[:60]
+            source = escape_md_table(article.get('source', '未知'))
+            article_type = article.get('_type', '其他')
+            published = format_date(article.get('published', ''))
+            summary = truncate_text(strip_html_tags(article.get('content', '')), 80)
+
+            lines.append(f'| **{i}** | **{title}** | {source} | {article_type} | {published} | {summary} |')
+
+        return lines
+
+    def _generate_region_section(self, region: str) -> List[str]:
+        """Generate section for a region."""
+        lines = [f'## {self._region_emoji(region)} {region}', '']
+
+        types = self.categorized[region]
+        # Different type order for different regions
+        if region == '学习强国':
+            type_order = ['政策解读', '重要讲话', '改革发展', '时政新闻', '其他']
+        else:
+            type_order = ['政策文件', '项目动态', '监管通知', '其他']
+
+        has_content = False
+        for article_type in type_order:
+            if article_type not in types or not types[article_type]:
+                continue
+
+            has_content = True
+            lines.append(f'### {self._type_emoji(article_type)} {article_type}')
+            lines.append('')
+
+            # Generate table for this type
+            lines.extend(self._generate_article_table(types[article_type], article_type))
+            lines.append('')
+
+        if not has_content:
+            lines.append('*暂无新动态*')
+            lines.append('')
+
+        return lines
+
+    def _generate_article_table(self, articles: List[Dict[str, Any]], article_type: str) -> List[str]:
+        """Generate table for articles of a specific type."""
+        lines = []
+
+        # Table header based on article type
+        if article_type == '政策文件':
+            lines.append('| 发布日期 | 标题 | 来源 | 摘要 | 链接 |')
+            lines.append('| :--- | :--- | :--- | :--- | :--- |')
+        elif article_type == '项目动态':
+            lines.append('| 发布日期 | 项目名称 | 类型 | 摘要 | 链接 |')
+            lines.append('| :--- | :--- | :--- | :--- | :--- |')
+        elif article_type in ['政策解读', '重要讲话', '改革发展', '时政新闻']:
+            lines.append('| 发布日期 | 标题 | 来源 | 摘要 | 链接 |')
+            lines.append('| :--- | :--- | :--- | :--- | :--- |')
+        else:
+            lines.append('| 发布日期 | 标题 | 来源 | 摘要 | 链接 |')
+            lines.append('| :--- | :--- | :--- | :--- | :--- |')
+
+        for article in articles[:20]:  # Limit to 20 per type
+            published = format_date(article.get('published', ''))
+            title = escape_md_table(article.get('title', ''))[:50]
+            source = escape_md_table(article.get('source', '未知'))
+            summary = truncate_text(strip_html_tags(article.get('content', '')), 60)
+            link = article.get('link', '')
+
+            # Shorten link for display
+            if link and len(link) > 40:
+                link_display = '...' + link[-37:]
+            else:
+                link_display = link
+
+            lines.append(f'| {published} | {title} | {source} | {summary} | [{link_display}]({link}) |')
+
+        return lines
+
+    def _generate_footer(self) -> List[str]:
+        """Generate report footer."""
+        return [
+            '---',
+            '',
+            '📊 **统计信息**',
+            f'- 总文章数: {self.stats["total"]}',
+            f'- 生成时间: {datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")}',
+            '',
+            '**本报告由 `fin-pol-gov-news` 自动生成**',
+            '**数据来源**: 深圳市政府、北京市政府、广东省政府、人民银行、金融监管总局官网、学习强国平台',
+        ]
+
+    def _region_emoji(self, region: str) -> str:
+        """Get emoji for region."""
+        return {
+            '深圳': '🏙️',
+            '北京': '🏛️',
+            '广东': '🌏',
+            '金融监管': '🏦',
+            '学习强国': '📖',
+            '其他': '📋',
+        }.get(region, '')
+
+    def _type_emoji(self, article_type: str) -> str:
+        """Get emoji for article type."""
+        return {
+            '政策文件': '📄',
+            '项目动态': '🏗️',
+            '监管通知': '⚠️',
+            '政策解读': '📖',
+            '重要讲话': '🎯',
+            '改革发展': '🚀',
+            '时政新闻': '📰',
+            '其他': '📌',
+        }.get(article_type, '')
+
+
+def escape_md_table(text: str) -> str:
+    """Escape markdown table special characters."""
+    if not text:
+        return ''
+    return text.replace('|', '\\|').replace('\n', ' ')
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Generate detailed markdown report from merged JSON data"
+    )
+    parser.add_argument("--input", "-i", required=True, type=Path, help="Input JSON file")
+    parser.add_argument("--output", "-o", required=True, type=Path, help="Output markdown file")
+    parser.add_argument("--verbose", "-v", action="store_true")
+    args = parser.parse_args()
+
+    logging.basicConfig(
+        level=logging.DEBUG if args.verbose else logging.INFO,
+        format="%(levelname)s: %(message)s"
+    )
+
+    if not args.input.exists():
+        logging.error(f"Input file not found: {args.input}")
+        sys.exit(1)
+
+    logging.info(f"Reading {args.input}")
+    with open(args.input, 'r', encoding='utf-8') as f:
+        data = json.load(f)
+
+    generator = ReportGenerator(data)
+    report = generator.generate()
+
+    with open(args.output, 'w', encoding='utf-8') as f:
+        f.write(report)
+
+    logging.info(f"✅ Report generated: {args.output}")
+    logging.info(f"   Total articles: {generator.stats['total']}")
+
+
+if __name__ == "__main__":
+    main()

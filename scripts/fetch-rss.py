@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 """
 Fetch RSS feeds using requests library (fixes SSL ECC issues).
 
@@ -48,6 +48,10 @@ RETRY_COUNT = 3
 RETRY_DELAY = 2.0
 RSS_CACHE_PATH = os.path.join(tempfile.gettempdir(), "fin-pol-gov-news-rss-cache.json")
 RSS_CACHE_TTL_HOURS = 24
+# Shenzhen government RSS fails OpenSSL's default EC handshake with BAD_ECPOINT
+# in our Linux environments. Keep this workaround scoped to sz.gov.cn only.
+SZ_GOV_HOST = "www.sz.gov.cn"
+SZ_GOV_LEGACY_CIPHERS = "HIGH:!ECDHE:!ECDSA:!EC:!aNULL:!eNULL:!MD5:!RC4"
 
 
 def setup_logging(verbose: bool) -> logging.Logger:
@@ -62,24 +66,67 @@ def setup_logging(verbose: bool) -> logging.Logger:
 
 
 class SSLAdapter(HTTPAdapter):
-    """Custom HTTP adapter with TLS 1.2+ support for government websites."""
+    """HTTP adapter with optional custom SSL context."""
+    def __init__(self, ssl_context: Optional[ssl.SSLContext] = None, **kwargs):
+        self.ssl_context = ssl_context
+        super().__init__(**kwargs)
+
     def init_poolmanager(self, connections, maxsize, block=False):
-        ctx = ssl.create_default_context()
-        if hasattr(ctx, "minimum_version"):
-            ctx.minimum_version = ssl.TLSVersion.TLSv1_2
         self.poolmanager = PoolManager(
             num_pools=connections,
             maxsize=maxsize,
             block=block,
-            ssl_context=ctx,
+            ssl_context=self.ssl_context,
         )
 
     def proxy_manager_for(self, *args, **kwargs):
-        ctx = ssl.create_default_context()
-        if hasattr(ctx, "minimum_version"):
-            ctx.minimum_version = ssl.TLSVersion.TLSv1_2
-        kwargs["ssl_context"] = ctx
+        if self.ssl_context is not None:
+            kwargs["ssl_context"] = self.ssl_context
         return super().proxy_manager_for(*args, **kwargs)
+
+
+def create_default_ssl_context() -> ssl.SSLContext:
+    """Create the default SSL context used by most feeds."""
+    ctx = ssl.create_default_context()
+    if hasattr(ctx, "minimum_version"):
+        ctx.minimum_version = ssl.TLSVersion.TLSv1_2
+    return ctx
+
+def create_sz_gov_ssl_context() -> ssl.SSLContext:
+    """Create a conservative TLS context for sz.gov.cn RSS endpoints.
+
+    The official Shenzhen RSS feeds are valid, but the server negotiates an
+    EC-based handshake that trips OpenSSL with BAD_ECPOINT in our gateway and
+    server environments. We avoid that path by pinning TLS 1.2 and excluding
+    EC/ECDHE cipher suites for this host only.
+    """
+    ctx = create_default_ssl_context()
+    if hasattr(ctx, "maximum_version"):
+        ctx.maximum_version = ssl.TLSVersion.TLSv1_2
+    try:
+        ctx.set_ciphers(SZ_GOV_LEGACY_CIPHERS)
+    except ssl.SSLError:
+        logging.debug("Failed to apply legacy cipher list for sz.gov.cn", exc_info=True)
+    return ctx
+
+
+def build_session(feed_url: str) -> requests.Session:
+    """Create a requests session tuned for the target feed host.
+
+    Most feeds use the default TLS policy. Only sz.gov.cn gets the legacy
+    cipher workaround verified with curl on the router.
+    """
+    session = requests.Session()
+    host = (urlparse(feed_url).hostname or "").lower()
+    if host == SZ_GOV_HOST:
+        # Mirror the requests-side workaround so curl fallback does not hit
+        # the same BAD_ECPOINT failure on the Shenzhen RSS host.
+        adapter = SSLAdapter(ssl_context=create_sz_gov_ssl_context())
+    else:
+        adapter = SSLAdapter(ssl_context=create_default_ssl_context())
+    session.mount("https://", adapter)
+    session.mount("http://", adapter)
+    return session
 
 
 def should_retry_with_curl(exc: Exception) -> bool:
@@ -120,7 +167,11 @@ def parse_curl_headers(raw_headers: str) -> Dict[str, Any]:
 
 
 def fetch_with_curl(feed_url: str, headers: Dict[str, str], timeout: int) -> Dict[str, Any]:
-    """Fetch a feed via curl as a fallback for OpenSSL handshake failures."""
+    """Fetch a feed via curl as a fallback for OpenSSL handshake failures.
+
+    curl uses the same OpenSSL family on our Linux boxes, so the Shenzhen host
+    needs the same TLS 1.2 + non-EC cipher workaround here as well.
+    """
     curl_bin = shutil.which("curl")
     if not curl_bin:
         raise RuntimeError("curl is not installed")
@@ -134,6 +185,7 @@ def fetch_with_curl(feed_url: str, headers: Dict[str, str], timeout: int) -> Dic
         "--silent",
         "--show-error",
         "--location",
+        "--tlsv1.2",
         "--max-time",
         str(timeout),
         "--output",
@@ -148,6 +200,15 @@ def fetch_with_curl(feed_url: str, headers: Dict[str, str], timeout: int) -> Dic
         if key.lower() == "user-agent":
             continue
         cmd.extend(["--header", f"{key}: {value}"])
+
+    host = (urlparse(feed_url).hostname or "").lower()
+    if host == SZ_GOV_HOST:
+        cmd.extend([
+            "--tls-max",
+            "1.2",
+            "--ciphers",
+            SZ_GOV_LEGACY_CIPHERS,
+        ])
 
     cmd.append(feed_url)
 
@@ -319,9 +380,7 @@ def fetch_feed(source: Dict[str, Any], hours: int, retries: int = RETRY_COUNT, t
     priority = source.get('priority', False)
     topics = source.get('topics', [])
 
-    session = requests.Session()
-    session.mount('https://', SSLAdapter())
-    session.mount('http://', SSLAdapter())
+    session = build_session(feed_url)
 
     articles = []
     success = False
@@ -363,7 +422,7 @@ def fetch_feed(source: Dict[str, Any], hours: int, retries: int = RETRY_COUNT, t
 
             # Handle 304 Not Modified
             if response_data["status_code"] == 304:
-                logging.info(f"⏭ {source_name}: not modified (304)")
+                logging.info(f"SKIP {source_name}: not modified (304)")
                 return {
                     "source_id": source_id,
                     "source_type": "rss",
@@ -446,7 +505,7 @@ def fetch_feed(source: Dict[str, Any], hours: int, retries: int = RETRY_COUNT, t
 
                         # Validate domain if expected_domains is set
                         if not validate_article_domain(link, source):
-                            logging.warning(f"⚠️ {source_name}: rejected article with unexpected domain: {link}")
+                            logging.warning(f"WARN {source_name}: rejected article with unexpected domain: {link}")
                             continue
 
                         # Extract content
@@ -682,11 +741,11 @@ def main() -> int:
 
                 if result["status"] == "ok":
                     if result.get("not_modified"):
-                        logger.debug(f"鈴?{result['name']}: not modified")
+                        logger.debug(f"SKIP {result['name']}: not modified")
                     else:
-                        logger.debug(f"鉁?{result['name']}: {result['count']} articles")
+                        logger.debug(f"OK {result['name']}: {result['count']} articles")
                 else:
-                    logger.debug(f"鉂?{result['name']}: {result.get('error', 'unknown error')}")
+                    logger.debug(f"ERR {result['name']}: {result.get('error', 'unknown error')}")
 
         # Flush conditional request cache
         _flush_rss_cache()
@@ -715,13 +774,13 @@ def main() -> int:
         with open(args.output, "w", encoding='utf-8') as f:
             f.write(json_str)
 
-        logger.info(f"✅ Done: {ok_count}/{len(results)} feeds ok, "
-                   f"{total_articles} articles → {args.output}")
+        logger.info(f"Done: {ok_count}/{len(results)} feeds ok, "
+                   f"{total_articles} articles -> {args.output}")
 
         return 0
 
     except Exception as e:
-        logger.error(f"💥 RSS fetch failed: {e}")
+        logger.error(f"RSS fetch failed: {e}")
         return 1
 
 
