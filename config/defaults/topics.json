@@ -1,0 +1,117 @@
+{
+  "_description": "政策金融主题定义。每个主题定义报告中的一个分类，包含搜索关键词、过滤规则和显示偏好。",
+  "_updated": "2026-03-29",
+  "_version": "1.3.0",
+  "topics": [
+    {
+      "id": "policy",
+      "emoji": "📄",
+      "label": "政策文件",
+      "description": "法律法规、规章、规范性文件、征求意见稿等政府政策文件",
+      "search": {
+        "queries": [
+          "site:beijing.gov.cn 政策文件 最新发布",
+          "site:beijing.gov.cn 征求意见稿",
+          "site:gd.gov.cn 政策文件 规范性文件",
+          "site:gd.gov.cn 政府法规 征求意见",
+          "site:pbc.gov.cn 货币政策 政策文件",
+          "site:nfra.gov.cn 监管政策 通知",
+          "site:jrj.beijing.gov.cn 金融监管 政策",
+          "site:gdjr.gd.gov.cn 金融政策 通知"
+        ],
+        "must_include": ["政策", "办法", "规定", "条例", "通知", "意见", "征求意见", "实施", "监管", "货币", "金融"],
+        "exclude": ["人事任免", "会议活动", "内部通知", "党建", "培训", "日常工作"]
+      },
+      "display": {
+        "max_items": 15,
+        "style": "detailed"
+      }
+    },
+    {
+      "id": "project",
+      "emoji": "🏗️",
+      "label": "项目动态",
+      "description": "重大项目、招标公告、项目公示、审批结果、中标通知等",
+      "search": {
+        "queries": [
+          "site:beijing.gov.cn 招标公告 项目公示",
+          "site:gd.gov.cn 重大项目 招标",
+          "site:szggzy.com 政府采购 招标",
+          "site:ggzyfw.beijing.gov.cn 招标公告 中标",
+          "site:gdgpo.czt.gd.gov.cn 政府采购 公告"
+        ],
+        "must_include": ["招标", "采购", "项目", "公示", "中标", "审批", "备案"],
+        "exclude": ["询价", "小额", "办公用品", "服务类"]
+      },
+      "display": {
+        "max_items": 10,
+        "style": "compact"
+      }
+    },
+    {
+      "id": "finance",
+      "emoji": "💰",
+      "label": "金融政策",
+      "description": "货币政策、金融监管、资本市场、绿色金融、跨境金融等",
+      "search": {
+        "queries": [
+          "site:pbc.gov.cn 货币政策 最新",
+          "site:pbc.gov.cn 金融稳定 政策",
+          "site:nfra.gov.cn 金融监管 机构",
+          "site:nfra.gov.cn 银行业 保险业",
+          "site:jrj.beijing.gov.cn 金融创新 政策",
+          "site:gdjr.gd.gov.cn 金融科技 政策"
+        ],
+        "must_include": ["金融", "货币", "监管", "资本", "银行", "证券", "保险", "绿色金融", "跨境", "货币政策"],
+        "exclude": ["理财产品", "个人理财", "投资建议", "理财销售"]
+      },
+      "display": {
+        "max_items": 8,
+        "style": "detailed"
+      }
+    },
+    {
+      "id": "regulation",
+      "emoji": "🛡️",
+      "label": "监管通知",
+      "description": "行政处罚、风险提示、业务指引、会议通知等监管动态",
+      "search": {
+        "queries": [
+          "site:pbc.gov.cn 行政处罚 风险提示",
+          "site:nfra.gov.cn 行政处罚 决定书",
+          "site:nfra.gov.cn 风险提示 警示",
+          "site:jrj.beijing.gov.cn 监管动态 处罚",
+          "site:gdjr.gd.gov.cn 风险提示 通知"
+        ],
+        "must_include": ["监管", "处罚", "风险", "警示", "整改", "检查", "执法", "行政处罚"],
+        "exclude": []
+      },
+      "display": {
+        "max_items": 6,
+        "style": "compact"
+      }
+    },
+    {
+      "id": "xuexi",
+      "emoji": "📖",
+      "label": "学习强国",
+      "description": "学习强国平台的时政新闻、政策解读、重要讲话精神等",
+      "search": {
+        "queries": [
+          "site:xuexi.cn 时政新闻 最新",
+          "site:xuexi.cn 政策解读 发布",
+          "site:xuexi.cn 重要讲话 精神",
+          "site:xuexi.cn 经济政策 金融",
+          "site:xuexi.cn 深圳改革 发展",
+          "site:xuexi.cn 广东高质量发展"
+        ],
+        "must_include": ["政策", "改革", "发展", "创新", "金融", "经济", "深圳", "广东", "重要讲话", "精神", "意见", "通知"],
+        "exclude": ["文学", "艺术", "娱乐", "体育", "游戏"]
+      },
+      "display": {
+        "max_items": 12,
+        "style": "detailed"
+      }
+    }
+  ]
+}

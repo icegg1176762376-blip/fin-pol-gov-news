@@ -1,0 +1,126 @@
+{
+  "_description": "政府政策与金融监管RSS数据源配置。无RSS的网站通过topics.json的search.queries使用fetch-web.py抓取。",
+  "_updated": "2026-03-29",
+  "_version": "1.4.0",
+  "sources": [
+    {
+      "id": "sz-gov-zcfg",
+      "type": "rss",
+      "name": "深圳政府规章",
+      "url": "https://www.sz.gov.cn/cn/qt/gxhdz/rss_zfgb/index.xml",
+      "enabled": true,
+      "priority": true,
+      "topics": ["policy"],
+      "note": "深圳市政府规章 RSS"
+    },
+    {
+      "id": "sz-gov-zwdt",
+      "type": "rss",
+      "name": "深圳政务动态",
+      "url": "https://www.sz.gov.cn/cn/qt/gxhdz/rss_zwdt/index.xml",
+      "enabled": true,
+      "priority": true,
+      "topics": ["policy"],
+      "note": "深圳市政务动态 RSS"
+    },
+    {
+      "id": "sz-gov-bmdt",
+      "type": "rss",
+      "name": "深圳部门动态",
+      "url": "https://www.sz.gov.cn/cn/qt/gxhdz/rss_bmdt/index.xml",
+      "enabled": true,
+      "priority": true,
+      "topics": ["policy"],
+      "note": "深圳市部门动态 RSS"
+    },
+    {
+      "id": "sz-gov-tzgg",
+      "type": "rss",
+      "name": "深圳通知公告",
+      "url": "https://www.sz.gov.cn/cn/qt/gxhdz/rss_tzgg/index.xml",
+      "enabled": true,
+      "priority": true,
+      "topics": ["policy", "project"],
+      "note": "深圳市通知公告 RSS - 含招标、公示"
+    },
+    {
+      "id": "sz-gov-gqdt",
+      "type": "rss",
+      "name": "深圳区情动态",
+      "url": "https://www.sz.gov.cn/cn/qt/gxhdz/rss_gqdt/index.xml",
+      "enabled": true,
+      "priority": false,
+      "topics": ["policy", "project"],
+      "note": "深圳市区情动态 RSS"
+    },
+    {
+      "id": "sz-gov-cwhy",
+      "type": "rss",
+      "name": "深圳财务要闻",
+      "url": "https://www.sz.gov.cn/cn/qt/gxhdz/rss_cwhy/index.xml",
+      "enabled": true,
+      "priority": true,
+      "topics": ["finance", "policy"],
+      "note": "深圳市财务要闻 RSS"
+    },
+    {
+      "id": "sz-gov-xwfb",
+      "type": "rss",
+      "name": "深圳新闻发布",
+      "url": "https://www.sz.gov.cn/cn/qt/gxhdz/rss_xwfb/index.xml",
+      "enabled": true,
+      "priority": false,
+      "topics": ["policy"],
+      "note": "深圳市新闻发布 RSS"
+    },
+    {
+      "id": "sz-gov-rsxx",
+      "type": "rss",
+      "name": "深圳人事信息",
+      "url": "https://www.sz.gov.cn/cn/qt/gxhdz/rss_rsxx/index.xml",
+      "enabled": true,
+      "priority": false,
+      "topics": ["policy"],
+      "note": "深圳市人事信息 RSS"
+    },
+    {
+      "id": "csrc-news",
+      "type": "rss",
+      "name": "证监会新闻",
+      "url": "https://rsshub.app/gov/csrc/news",
+      "enabled": false,
+      "priority": true,
+      "topics": ["finance", "regulation"],
+      "note": "证监会 RSSHub路由 - 可能有bug"
+    },
+    {
+      "id": "csrc-penalty",
+      "type": "rss",
+      "name": "证监会处罚",
+      "url": "https://rsshub.app/gov/csrc/penalty",
+      "enabled": false,
+      "priority": true,
+      "topics": ["regulation"],
+      "note": "证监会行政处罚 RSSHub路由 - 可能有bug"
+    }
+  ],
+  "categories": {
+    "policy": ["政策文件", "规范性文件", "征求意见稿", "法规"],
+    "project": ["重大项目", "招标公告", "项目公示", "中标通知"],
+    "regulation": ["监管通知", "行政处罚", "风险提示", "业务指引"],
+    "finance": ["货币政策", "金融稳定", "资本市场", "银行业"],
+    "xuexi": ["时政新闻", "政策解读", "重要讲话", "精神", "改革发展"]
+  },
+  "keywords": {
+    "priority": [
+      "支持政策", "财政补贴", "税收优惠", "产业扶持",
+      "重大项目", "基础设施", "招商引资", "产业园区",
+      "金融创新", "跨境金融", "绿色金融", "金融科技",
+      "征求意见", "即将实施", "管理办法", "实施细则"
+    ],
+    "exclude": [
+      "人事任免", "会议活动", "日常工作", "内部通知",
+      "党建", "培训", "调研", "考察"
+    ]
+  }
+}
