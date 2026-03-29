@@ -292,7 +292,11 @@ def resolve_link(link: str, base_url: str) -> str:
 
 
 def parse_date_fallback(date_str: str) -> Optional[datetime]:
-    """Parse date string using multiple format patterns (fallback method)."""
+    """Parse date string using multiple format patterns (fallback method).
+
+    Note: For dates without timezone info, assumes China Standard Time (UTC+8)
+    since this is for Chinese government RSS feeds.
+    """
     if not date_str:
         return None
 
@@ -312,11 +316,15 @@ def parse_date_fallback(date_str: str) -> Optional[datetime]:
         "%Y-%m-%d",
     ]
 
+    # China Standard Time (UTC+8)
+    CHINA_TZ = timezone(timedelta(hours=8))
+
     for fmt in formats:
         try:
             dt = datetime.strptime(date_str, fmt)
             if dt.tzinfo is None:
-                dt = dt.replace(tzinfo=timezone.utc)
+                # Assume China Standard Time for naive dates
+                dt = dt.replace(tzinfo=CHINA_TZ)
             return dt
         except ValueError:
             continue
@@ -466,7 +474,7 @@ def fetch_feed(source: Dict[str, Any], hours: int, retries: int = RETRY_COUNT, t
 
                 for entry in feed.entries[:MAX_ARTICLES_PER_FEED]:
                     try:
-                        # Parse published date - skip if unparseable
+                        # Parse published date - use current time as fallback
                         published = None
                         date_fields = [
                             (entry, 'published_parsed'),
@@ -489,8 +497,8 @@ def fetch_feed(source: Dict[str, Any], hours: int, retries: int = RETRY_COUNT, t
                                     if published:
                                         break
 
-                        # Skip article if date cannot be parsed or is too old
-                        if published is None or published < cutoff:
+                        # Filter by date (skip if older than cutoff)
+                        if published is not None and published < cutoff:
                             continue
 
                         # Extract title and link
@@ -534,13 +542,20 @@ def fetch_feed(source: Dict[str, Any], hours: int, retries: int = RETRY_COUNT, t
                 content = text_content
 
                 # RSS 2.0 items
-                for item in re.finditer(r"<item[^>]*>(.*?)</item>", content, re.DOTALL):
+                item_matches = list(re.finditer(r"<item[^>]*>(.*?)</item>", content, re.DOTALL))
+                logging.debug(f"{source_name}: found {len(item_matches)} <item> tags")
+                for i, item in enumerate(item_matches):
                     title = strip_tags(get_tag(item.group(1), "title"))[:200]
                     link = resolve_link(get_tag(item.group(1), "link"), final_url)
                     date_str = get_tag(item.group(1), "pubDate") or get_tag(item.group(1), "dc:date")
                     pub_date = parse_date_fallback(date_str)
 
-                    if title and link and pub_date and pub_date >= cutoff:
+                    if title and link:
+                        # Filter by date (skip if older than cutoff or no date)
+                        if pub_date is None or pub_date < cutoff:
+                            if pub_date is None:
+                                logging.debug(f"{source_name}: item {i+1} skipped - no date")
+                            continue
                         if validate_article_domain(link, source):
                             articles.append({
                                 'title': title,
@@ -552,6 +567,8 @@ def fetch_feed(source: Dict[str, Any], hours: int, retries: int = RETRY_COUNT, t
                                 'content': '',
                                 'topics': topics[:],
                             })
+                    else:
+                        logging.debug(f"{source_name}: item {i+1} skipped - title={bool(title)}, link={bool(link)}")
 
                 # Atom entries fallback
                 if not articles:
@@ -570,7 +587,10 @@ def fetch_feed(source: Dict[str, Any], hours: int, retries: int = RETRY_COUNT, t
                         date_str = get_tag(block, "updated") or get_tag(block, "published")
                         pub_date = parse_date_fallback(date_str)
 
-                        if title and link and pub_date and pub_date >= cutoff:
+                        if title and link:
+                            # Filter by date (skip if older than cutoff or no date)
+                            if pub_date is None or pub_date < cutoff:
+                                continue
                             if validate_article_domain(link, source):
                                 articles.append({
                                     'title': title,
@@ -586,6 +606,7 @@ def fetch_feed(source: Dict[str, Any], hours: int, retries: int = RETRY_COUNT, t
                 articles = articles[:MAX_ARTICLES_PER_FEED]
 
             success = True
+            logging.debug(f"{source_name}: parsed {len(articles)} articles from feed")
             break
 
         except requests.RequestException as e:
