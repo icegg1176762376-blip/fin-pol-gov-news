@@ -466,10 +466,12 @@ def fetch_feed(source: Dict[str, Any], hours: int, retries: int = RETRY_COUNT, t
 
             if HAS_FEEDPARSER:
                 feed = feedparser.parse(raw_content)
+                logging.debug(f"{source_name}: feedparser found {len(feed.entries)} entries, bozo={feed.bozo}")
                 if feed.bozo and feed.feed.get('bozo_exception'):
                     # Some feeds have recoverable parse errors, continue if we got entries
                     if not feed.entries:
                         error_msg = f"Bozo feed: {feed.bozo_exception}"
+                        logging.debug(f"{source_name}: {error_msg}")
                         continue
 
                 for entry in feed.entries[:MAX_ARTICLES_PER_FEED]:
@@ -499,6 +501,7 @@ def fetch_feed(source: Dict[str, Any], hours: int, retries: int = RETRY_COUNT, t
 
                         # Filter by date (skip if older than cutoff)
                         if published is not None and published < cutoff:
+                            logging.debug(f"{source_name}: entry skipped - date too old: {published} < {cutoff}")
                             continue
 
                         # Extract title and link
@@ -509,6 +512,7 @@ def fetch_feed(source: Dict[str, Any], hours: int, retries: int = RETRY_COUNT, t
                         link = resolve_link(link, final_url)
 
                         if not title or not link:
+                            logging.debug(f"{source_name}: entry skipped - title={bool(title)}, link={bool(link)}")
                             continue
 
                         # Validate domain if expected_domains is set
@@ -526,7 +530,7 @@ def fetch_feed(source: Dict[str, Any], hours: int, retries: int = RETRY_COUNT, t
                         article = {
                             'title': title,
                             'link': link,
-                            'published': published.isoformat(),
+                            'published': published.isoformat() if published else datetime.now(timezone.utc).isoformat(),
                             'source': source_name,
                             'source_id': source_id,
                             'source_type': 'rss',
