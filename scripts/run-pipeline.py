@@ -1,21 +1,16 @@
 #!/usr/bin/env python3
 """
-Unified data collection pipeline for tech-news-digest.
+Unified data collection pipeline for fin-pol-gov-news.
 
-Runs all 6 fetch steps (RSS, Twitter, GitHub, GitHub Trending, Reddit, Web) in parallel,
-then merges + deduplicates + scores into a single output JSON.
-
-Replaces the agent's sequential 6-step tool-call loop with one command,
-eliminating ~60-120s of LLM round-trip overhead.
+Runs RSS and Web fetch steps, then merges + deduplicates + scores into a single output JSON.
+Optimized for government policy and financial regulation news.
 
 Usage:
-    python3 run-pipeline.py \
-      --defaults <SKILL_DIR>/config/defaults \
-      --config <WORKSPACE>/config \
-      --hours 48 --freshness pd \
-      --archive-dir <WORKSPACE>/archive/tech-news-digest/ \
-      --output /tmp/td-merged.json \
-      --verbose
+ python3 run-pipeline.py \
+ --defaults config/defaults \
+ --hours 48 --freshness pd \
+ --output /tmp/fin-pol-merged.json \
+ --verbose
 """
 
 import json
@@ -30,8 +25,7 @@ from pathlib import Path
 from typing import Dict, Any
 
 SCRIPTS_DIR = Path(__file__).parent
-DEFAULT_TIMEOUT = 180  # per-step timeout in seconds
-
+DEFAULT_TIMEOUT = 180
 
 def setup_logging(verbose: bool) -> logging.Logger:
     level = logging.DEBUG if verbose else logging.INFO
@@ -42,51 +36,27 @@ def setup_logging(verbose: bool) -> logging.Logger:
     )
     return logging.getLogger(__name__)
 
-
-def run_step(
-    name: str,
-    script: str,
-    args_list: list,
-    output_path: Path,
-    timeout: int = DEFAULT_TIMEOUT,
-    force: bool = False,
-) -> Dict[str, Any]:
+def run_step(name: str, script: str, args_list: list, output_path: Path, timeout: int = DEFAULT_TIMEOUT, force: bool = False) -> Dict[str, Any]:
     """Run a fetch script as a subprocess, return result metadata."""
     t0 = time.time()
-    cmd = [sys.executable, str(SCRIPTS_DIR / script)] + args_list + [
-        "--output", str(output_path),
-    ]
+    cmd = [sys.executable, str(SCRIPTS_DIR / script)] + args_list + ["--output", str(output_path)]
     if force:
         cmd.append("--force")
-
+    
     try:
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            env=os.environ,
-        )
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, env=os.environ)
         elapsed = time.time() - t0
         ok = result.returncode == 0
-
-        # Try to read output stats
+        
         count = 0
         if ok and output_path.exists():
             try:
                 with open(output_path) as f:
                     data = json.load(f)
-                count = (
-                    data.get("total_articles")
-                    or data.get("total_posts")
-                    or data.get("total_releases")
-                    or data.get("total_results")
-                    or data.get("total")
-                    or 0
-                )
+                    count = data.get("total_articles") or data.get("total_results") or 0
             except (json.JSONDecodeError, OSError):
                 pass
-
+        
         return {
             "name": name,
             "status": "ok" if ok else "error",
@@ -94,7 +64,6 @@ def run_step(
             "count": count,
             "stderr_tail": (result.stderr or "").strip().split("\n")[-3:] if not ok else [],
         }
-
     except subprocess.TimeoutExpired:
         elapsed = time.time() - t0
         return {
@@ -114,192 +83,86 @@ def run_step(
             "stderr_tail": [str(e)],
         }
 
-
 def main() -> int:
-    parser = argparse.ArgumentParser(
-        description="Run the full tech-news-digest data pipeline in one shot.",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-    )
+    parser = argparse.ArgumentParser(description="Run the fin-pol-gov-news data pipeline.")
     _script_dir = Path(__file__).resolve().parent
     _default_defaults = _script_dir.parent / "config" / "defaults"
-    parser.add_argument("--defaults", type=Path, default=_default_defaults, help="Skill defaults config dir (default: <skill>/config/defaults)")
-    parser.add_argument("--config", type=Path, default=None, help="User config overlay dir")
-    parser.add_argument("--hours", type=int, default=48, help="Time window in hours")
-    parser.add_argument("--freshness", type=str, default="pd", help="Web search freshness (pd/pw/pm)")
-    parser.add_argument("--archive-dir", type=Path, default=None, help="Archive dir for dedup penalty")
-    parser.add_argument("--output", "-o", type=Path, default=Path("/tmp/td-merged.json"), help="Final merged output")
-    parser.add_argument("--step-timeout", type=int, default=DEFAULT_TIMEOUT, help="Per-step timeout (seconds)")
-    parser.add_argument("--twitter-backend", choices=["official", "twitterapiio", "auto"], default=None, help="Twitter API backend to use")
+    
+    parser.add_argument("--defaults", type=Path, default=_default_defaults)
+    parser.add_argument("--config", type=Path, default=None)
+    parser.add_argument("--hours", type=int, default=48)
+    parser.add_argument("--freshness", type=str, default="pd")
+    parser.add_argument("--output", "-o", type=Path, default=Path("/tmp/fin-pol-merged.json"))
+    parser.add_argument("--step-timeout", type=int, default=DEFAULT_TIMEOUT)
     parser.add_argument("--verbose", "-v", action="store_true")
-    parser.add_argument("--force", action="store_true", help="Force re-fetch ignoring caches")
-    parser.add_argument("--enrich", action="store_true", help="Enable full-text enrichment for top articles")
-    parser.add_argument("--skip", type=str, default="", help="Comma-separated list of steps to skip (rss,twitter,github,trending,reddit,web)")
-    parser.add_argument("--only", type=str, default="", help="Comma-separated list of steps to run (rss,twitter,github,trending,reddit,web). Others are skipped.")
-    parser.add_argument("--reuse-dir", type=Path, default=None, help="Reuse existing intermediate directory instead of creating new one")
-    parser.add_argument("--debug", action="store_true", help="Keep intermediate fetch outputs (rss.json, twitter.json, etc.) alongside final output")
-
+    parser.add_argument("--force", action="store_true")
+    
     args = parser.parse_args()
     logger = setup_logging(args.verbose)
-
-    # Parse --skip and --only into sets
-    skip_steps = set(s.strip().lower() for s in args.skip.split(',') if s.strip())
-    only_steps = set(s.strip().lower() for s in args.only.split(',') if s.strip())
     
-    # --only takes precedence: skip everything not in the list
-    if only_steps:
-        all_step_keys = {"rss", "twitter", "github", "github trending", "reddit", "web"}
-        skip_steps = all_step_keys - {k for k in all_step_keys if any(o in k for o in only_steps)}
-        logger.info(f"🎯 --only {args.only} → running: {all_step_keys - skip_steps}")
-
-    # Intermediate output paths
     import tempfile
-    if args.reuse_dir:
-        _run_dir = str(args.reuse_dir)
-        os.makedirs(_run_dir, exist_ok=True)
-    else:
-        _run_dir = tempfile.mkdtemp(prefix="td-pipeline-")
+    _run_dir = tempfile.mkdtemp(prefix="fin-pol-pipeline-")
     tmp_rss = Path(_run_dir) / "rss.json"
-    tmp_twitter = Path(_run_dir) / "twitter.json"
-    tmp_github = Path(_run_dir) / "github.json"
-    tmp_trending = Path(_run_dir) / "trending.json"
-    tmp_reddit = Path(_run_dir) / "reddit.json"
     tmp_web = Path(_run_dir) / "web.json"
+    
     logger.info(f"📁 Run directory: {_run_dir}")
-
-    # Common args for all fetch scripts
+    
+    # Common args
     common = ["--defaults", str(args.defaults)]
     if args.config:
         common += ["--config", str(args.config)]
     common += ["--hours", str(args.hours)]
     verbose_flag = ["--verbose"] if args.verbose else []
-
-    # Define the 5 parallel fetch steps
+    
+    # Define steps: RSS + Web only
     steps = [
         ("RSS", "fetch-rss.py", common + verbose_flag, tmp_rss),
-        ("Twitter", "fetch-twitter.py", common + verbose_flag + (["--backend", args.twitter_backend] if args.twitter_backend else []), tmp_twitter),
-        ("GitHub", "fetch-github.py", common + verbose_flag, tmp_github),
-        ("GitHub Trending", "fetch-github.py", ["--trending", "--hours", str(args.hours)] + verbose_flag, tmp_trending),
-        ("Reddit", "fetch-reddit.py", common + verbose_flag, tmp_reddit),
-        ("Web", "fetch-web.py",
-         ["--defaults", str(args.defaults)]
-         + (["--config", str(args.config)] if args.config else [])
-         + ["--freshness", args.freshness]
-         + verbose_flag,
-         tmp_web),
+        ("Web", "fetch-web.py", ["--defaults", str(args.defaults)] + (["--config", str(args.config)] if args.config else []) + ["--freshness", args.freshness] + verbose_flag, tmp_web),
     ]
-
-    # Filter steps by --skip and --reuse-dir
-    active_steps = []
-    for name, script, step_args, out_path in steps:
-        step_key = name.lower()
-        if step_key in skip_steps:
-            logger.info(f"  ⏭️  {name}: skipped (--skip)")
-            continue
-        if args.reuse_dir and out_path.exists() and not args.force:
-            logger.info(f"  ♻️  {name}: reusing existing {out_path}")
-            continue
-        active_steps.append((name, script, step_args, out_path))
-
-    logger.info(f"🚀 Starting pipeline: {len(active_steps)}/{len(steps)} sources, {args.hours}h window, freshness={args.freshness}")
+    
+    logger.info(f"🚀 Starting pipeline: {len(steps)} sources, {args.hours}h window")
     t_start = time.time()
-
+    
     # Phase 1: Parallel fetch
     step_results = []
-    if active_steps:
-        with ThreadPoolExecutor(max_workers=len(active_steps)) as pool:
-            futures = {}
-            for name, script, step_args, out_path in active_steps:
-                f = pool.submit(run_step, name, script, step_args, out_path, args.step_timeout, args.force)
-                futures[f] = name
-
-            for future in as_completed(futures):
-                res = future.result()
-                step_results.append(res)
-                status_icon = {"ok": "✅", "error": "❌", "timeout": "⏰"}.get(res["status"], "?")
-                logger.info(f"  {status_icon} {res['name']}: {res['count']} items ({res['elapsed_s']}s)")
-                if res["status"] != "ok" and res["stderr_tail"]:
-                    for line in res["stderr_tail"]:
-                        logger.debug(f"    {line}")
-
+    with ThreadPoolExecutor(max_workers=len(steps)) as pool:
+        futures = {}
+        for name, script, step_args, out_path in steps:
+            f = pool.submit(run_step, name, script, step_args, out_path, args.step_timeout, args.force)
+            futures[f] = name
+        
+        for future in as_completed(futures):
+            res = future.result()
+            step_results.append(res)
+            status_icon = {"ok": "✅", "error": "❌", "timeout": "⏰"}.get(res["status"], "?")
+            logger.info(f" {status_icon} {res['name']}: {res['count']} items ({res['elapsed_s']}s)")
+    
     fetch_elapsed = time.time() - t_start
     logger.info(f"📡 Fetch phase done in {fetch_elapsed:.1f}s")
-
+    
     # Phase 2: Merge
     logger.info("🔀 Merging & scoring...")
     merge_args = ["--verbose"] if args.verbose else []
-    for flag, path in [("--rss", tmp_rss), ("--twitter", tmp_twitter),
-                       ("--github", tmp_github), ("--trending", tmp_trending), ("--reddit", tmp_reddit),
-                       ("--web", tmp_web)]:
+    for flag, path in [("--rss", tmp_rss), ("--web", tmp_web)]:
         if path.exists():
             merge_args += [flag, str(path)]
-    if args.archive_dir:
-        merge_args += ["--archive-dir", str(args.archive_dir)]
     merge_args += ["--output", str(args.output)]
-
-    merge_result = run_step("Merge", "merge-sources.py", merge_args, args.output, timeout=60, force=False)
-
-    # Phase 3: Enrich high-scoring articles with full text
-    if merge_result["status"] == "ok" and args.enrich and "enrich" not in skip_steps:
-        logger.info("📰 Enriching top articles with full text...")
-        enrich_args = ["--input", str(args.output), "--output", str(args.output)]
-        enrich_args += ["--verbose"] if args.verbose else []
-        enrich_result = run_step("Enrich", "enrich-articles.py", enrich_args, args.output, timeout=120, force=False)
-    else:
-        enrich_result = {"name": "Enrich", "status": "skipped", "elapsed_s": 0, "count": 0, "stderr_tail": []}
-
-    total_elapsed = time.time() - t_start
-
+    
+    merge_result = run_step("Merge", "merge-sources.py", merge_args, args.output, timeout=60)
+    
+    status_icon = {"ok": "✅", "error": "❌"}.get(merge_result["status"], "?")
+    logger.info(f" {status_icon} Merge: {merge_result['count']} items ({merge_result['elapsed_s']}s)")
+    
     # Summary
-    logger.info(f"{'=' * 50}")
-    logger.info(f"📊 Pipeline Summary ({total_elapsed:.1f}s total)")
-    for r in step_results:
-        logger.info(f"   {r['name']:10s} {r['status']:7s} {r['count']:4d} items  {r['elapsed_s']:5.1f}s")
-    logger.info(f"   {'Merge':10s} {merge_result['status']:7s} {merge_result.get('count',0):4d} items  {merge_result['elapsed_s']:5.1f}s")
-    logger.info(f"   Output: {args.output}")
-
-    if merge_result["status"] != "ok":
-        logger.error(f"❌ Merge failed: {merge_result['stderr_tail']}")
-        return 1
-
-    # Write pipeline metadata alongside output for agent consumption
-    meta = {
-        "pipeline_version": "1.0.0",
-        "total_elapsed_s": round(total_elapsed, 1),
-        "fetch_elapsed_s": round(fetch_elapsed, 1),
-        "steps": step_results,
-        "merge": merge_result,
-        "output": str(args.output),
-    }
-    meta_path = args.output.with_suffix(".meta.json")
-    with open(meta_path, "w") as f:
-        json.dump(meta, f, indent=2)
-
-    if args.debug:
-        # Copy intermediate files next to final output for inspection
-        import shutil
-        debug_dir = args.output.parent / f"{args.output.stem}-debug"
-        debug_dir.mkdir(parents=True, exist_ok=True)
-        for fname in os.listdir(_run_dir):
-            src = Path(_run_dir) / fname
-            if src.is_file():
-                shutil.copy2(str(src), str(debug_dir / fname))
-        logger.info(f"🔍 Debug: intermediate files saved to {debug_dir}")
-        meta["debug_dir"] = str(debug_dir)
-        # Rewrite meta with debug_dir
-        with open(meta_path, "w") as f:
-            json.dump(meta, f, indent=2)
-
-    if not args.reuse_dir:
-        import shutil
-        try:
-            shutil.rmtree(_run_dir)
-            logger.debug(f"Cleaned up {_run_dir}")
-        except Exception:
-            pass
-
-    logger.info(f"✅ Done → {args.output}")
-    return 0
-
+    print("\n" + "=" * 50)
+    print("📊 Pipeline Summary")
+    print("=" * 50)
+    for res in step_results:
+        print(f"{res['name']} ok {res['count']} items {res['elapsed_s']}s")
+    print(f"Merge ok {merge_result['count']} items {merge_result['elapsed_s']}s")
+    print(f"Output: {args.output}")
+    
+    return 0 if merge_result["status"] == "ok" else 1
 
 if __name__ == "__main__":
     sys.exit(main())
