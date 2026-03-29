@@ -530,7 +530,7 @@ def fetch_feed(source: Dict[str, Any], hours: int, retries: int = RETRY_COUNT, t
                         article = {
                             'title': title,
                             'link': link,
-                            'published': published.isoformat() if published else datetime.now(timezone.utc).isoformat(),
+                            'published': published.isoformat() if published else datetime.now(timezone(timedelta(hours=8))).isoformat(),
                             'source': source_name,
                             'source_id': source_id,
                             'source_type': 'rss',
