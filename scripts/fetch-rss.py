@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """
 Fetch RSS feeds using requests library (fixes SSL ECC issues).
 
@@ -363,7 +363,7 @@ def fetch_feed(source: Dict[str, Any], hours: int, retries: int = RETRY_COUNT, t
 
             # Handle 304 Not Modified
             if response_data["status_code"] == 304:
-                logging.info(f"鈴?{source_name}: not modified (304)")
+                logging.info(f"⏭ {source_name}: not modified (304)")
                 return {
                     "source_id": source_id,
                     "source_type": "rss",
@@ -446,7 +446,7 @@ def fetch_feed(source: Dict[str, Any], hours: int, retries: int = RETRY_COUNT, t
 
                         # Validate domain if expected_domains is set
                         if not validate_article_domain(link, source):
-                            logging.warning(f"鈿狅笍 {source_name}: rejected article with unexpected domain: {link}")
+                            logging.warning(f"⚠️ {source_name}: rejected article with unexpected domain: {link}")
                             continue
 
                         # Extract content
@@ -715,17 +715,15 @@ def main() -> int:
         with open(args.output, "w", encoding='utf-8') as f:
             f.write(json_str)
 
-        logger.info(f"鉁?Done: {ok_count}/{len(results)} feeds ok, "
-                   f"{total_articles} articles 鈫?{args.output}")
+        logger.info(f"✅ Done: {ok_count}/{len(results)} feeds ok, "
+                   f"{total_articles} articles → {args.output}")
 
         return 0
 
     except Exception as e:
-        logger.error(f"馃挜 RSS fetch failed: {e}")
+        logger.error(f"💥 RSS fetch failed: {e}")
         return 1
 
 
 if __name__ == "__main__":
     sys.exit(main())
-
-
