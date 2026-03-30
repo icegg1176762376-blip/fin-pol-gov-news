@@ -24,6 +24,11 @@ Best for:
 
 May use Tavily, Brave, or generate a search interface depending on environment.
 
+When a topic returns `status: "filtered_empty"`, read its `diagnostics` block:
+- `raw_results_total` shows whether search found anything
+- `rejection_counts` shows why items were filtered out
+- `review_candidates` gives a small sample for AI inspection
+
 ### `scripts/merge-sources.py`
 
 Use to build a unified candidate set across collected outputs.

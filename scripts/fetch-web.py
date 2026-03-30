@@ -305,6 +305,62 @@ def filter_content(text: str, must_include: List[str], exclude: List[str]) -> bo
     return True
 
 
+def classify_filter_rejection(result: Dict[str, Any], cutoff: datetime,
+                              must_include: List[str], exclude: List[str]) -> Optional[str]:
+    """Return a rejection reason if a result should be filtered out."""
+    date_str = result.get("date", "")
+    if not date_str:
+        return "missing_date"
+
+    try:
+        pub_date = datetime.fromisoformat(date_str.replace('Z', '+00:00'))
+    except (ValueError, AttributeError):
+        return "invalid_date"
+
+    if pub_date < cutoff:
+        return "too_old"
+
+    combined_text = f"{result.get('title', '')} {result.get('snippet', '')}".lower()
+
+    if must_include and not any(keyword.lower() in combined_text for keyword in must_include):
+        return "missing_must_include"
+
+    if exclude and any(keyword.lower() in combined_text for keyword in exclude):
+        return "matched_exclude"
+
+    return None
+
+
+def build_review_candidate(result: Dict[str, Any], reason: str) -> Dict[str, Any]:
+    """Build a compact rejected-result record for agent review."""
+    return {
+        "title": result.get("title", ""),
+        "link": result.get("link", ""),
+        "source": result.get("source", ""),
+        "date": result.get("date", ""),
+        "snippet": result.get("snippet", "")[:200],
+        "reject_reason": reason,
+    }
+
+
+def build_filter_diagnostics(topic_id: str, must_include: List[str], exclude: List[str],
+                             raw_results_total: int, accepted_count: int,
+                             rejection_counts: Dict[str, int],
+                             review_candidates: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Build structured diagnostics for empty or heavily filtered topics."""
+    return {
+        "topic_id": topic_id,
+        "raw_results_total": raw_results_total,
+        "accepted_results": accepted_count,
+        "rejection_counts": rejection_counts,
+        "filters": {
+            "must_include": must_include,
+            "exclude": exclude,
+        },
+        "review_candidates": review_candidates[:5],
+    }
+
+
 def search_topic_brave(topic: Dict[str, Any], api_key: str, freshness: Optional[str] = None,
                        max_workers: int = 1, delay: float = 0.5, hours: int = 48) -> Dict[str, Any]:
     """Search all queries for a topic using Brave API.
@@ -324,6 +380,15 @@ def search_topic_brave(topic: Dict[str, Any], api_key: str, freshness: Optional[
 
     all_results = []
     query_stats = []
+    raw_results_total = 0
+    rejection_counts = {
+        "missing_date": 0,
+        "invalid_date": 0,
+        "too_old": 0,
+        "missing_must_include": 0,
+        "matched_exclude": 0,
+    }
+    review_candidates: List[Dict[str, Any]] = []
     
     if max_workers > 1:
         with ThreadPoolExecutor(max_workers=max_workers) as pool:
@@ -336,18 +401,16 @@ def search_topic_brave(topic: Dict[str, Any], api_key: str, freshness: Optional[
                     'count': search_result['total']
                 })
                 if search_result['status'] == 'ok':
+                    raw_results_total += len(search_result['results'])
                     for result in search_result['results']:
-                        # Filter: require valid published date within time window
-                        try:
-                            pub_date = datetime.fromisoformat(result.get('date', '').replace('Z', '+00:00'))
-                            if pub_date < cutoff:
-                                continue  # Too old
-                        except (ValueError, AttributeError):
-                            continue  # No valid date, skip
-                        combined_text = f"{result['title']} {result['snippet']}"
-                        if filter_content(combined_text, must_include, exclude):
+                        reason = classify_filter_rejection(result, cutoff, must_include, exclude)
+                        if reason is None:
                             result['topics'] = [topic_id]
                             all_results.append(result)
+                        else:
+                            rejection_counts[reason] = rejection_counts.get(reason, 0) + 1
+                            if len(review_candidates) < 5:
+                                review_candidates.append(build_review_candidate(result, reason))
     else:
         for query in queries:
             search_result = search_brave(query, api_key, freshness)
@@ -357,28 +420,39 @@ def search_topic_brave(topic: Dict[str, Any], api_key: str, freshness: Optional[
                 'count': search_result['total']
             })
             if search_result['status'] == 'ok':
+                raw_results_total += len(search_result['results'])
                 for result in search_result['results']:
-                    # Filter: require valid published date within time window
-                    try:
-                        pub_date = datetime.fromisoformat(result.get('date', '').replace('Z', '+00:00'))
-                        if pub_date < cutoff:
-                            continue  # Too old
-                    except (ValueError, AttributeError):
-                        continue  # No valid date, skip
-                    combined_text = f"{result['title']} {result['snippet']}"
-                    if filter_content(combined_text, must_include, exclude):
+                    reason = classify_filter_rejection(result, cutoff, must_include, exclude)
+                    if reason is None:
                         result['topics'] = [topic_id]
                         all_results.append(result)
+                    else:
+                        rejection_counts[reason] = rejection_counts.get(reason, 0) + 1
+                        if len(review_candidates) < 5:
+                            review_candidates.append(build_review_candidate(result, reason))
             time.sleep(delay)
-    
+
+    diagnostics = build_filter_diagnostics(
+        topic_id, must_include, exclude, raw_results_total, len(all_results),
+        rejection_counts, review_candidates
+    )
+    status = 'ok'
+    if raw_results_total > 0 and not all_results:
+        status = 'filtered_empty'
+        logging.warning(
+            f"Topic {topic_id}: search returned {raw_results_total} raw results but filters accepted 0"
+        )
+
     return {
         'topic_id': topic_id,
-        'status': 'ok',
+        'status': status,
         'queries_executed': len(queries),
         'queries_ok': sum(1 for q in query_stats if q['status'] == 'ok'),
         'query_stats': query_stats,
+        'raw_results_total': raw_results_total,
         'count': len(all_results),
-        'articles': all_results
+        'articles': all_results,
+        'diagnostics': diagnostics,
     }
 
 
@@ -463,6 +537,15 @@ def search_topic_tavily(topic: Dict[str, Any], api_key: str, days: Optional[int]
 
     all_results = []
     query_stats = []
+    raw_results_total = 0
+    rejection_counts = {
+        "missing_date": 0,
+        "invalid_date": 0,
+        "too_old": 0,
+        "missing_must_include": 0,
+        "matched_exclude": 0,
+    }
+    review_candidates: List[Dict[str, Any]] = []
 
     for query in queries:
         search_result = search_tavily(query, api_key, topic="news", days=days)
@@ -472,33 +555,37 @@ def search_topic_tavily(topic: Dict[str, Any], api_key: str, days: Optional[int]
             "count": search_result["total"],
         })
         if search_result["status"] == "ok":
+            raw_results_total += len(search_result["results"])
             for result in search_result["results"]:
-                # Filter: require valid published date within time window
-                date_str = result.get("date", "")
-                if not date_str:
-                    continue  # No date, skip
-                try:
-                    # Tavily returns dates in various formats, try ISO format
-                    pub_date = datetime.fromisoformat(date_str.replace('Z', '+00:00'))
-                    if pub_date < cutoff:
-                        continue  # Too old
-                except (ValueError, AttributeError):
-                    # If date parsing fails, skip this result
-                    continue
-                combined_text = f"{result['title']} {result['snippet']}"
-                if filter_content(combined_text, must_include, exclude):
+                reason = classify_filter_rejection(result, cutoff, must_include, exclude)
+                if reason is None:
                     result["topics"] = [topic_id]
                     all_results.append(result)
+                else:
+                    rejection_counts[reason] = rejection_counts.get(reason, 0) + 1
+                    if len(review_candidates) < 5:
+                        review_candidates.append(build_review_candidate(result, reason))
 
     ok_count = sum(1 for s in query_stats if s["status"] == "ok")
+    status = "ok" if ok_count > 0 else "error"
+    if raw_results_total > 0 and not all_results:
+        status = "filtered_empty"
+        logging.warning(
+            f"Topic {topic_id}: search returned {raw_results_total} raw results but filters accepted 0"
+        )
     return {
-        "topic": topic_id,
-        "status": "ok" if ok_count > 0 else "error",
+        "topic_id": topic_id,
+        "status": status,
         "queries": len(queries),
         "queries_ok": ok_count,
+        "raw_results_total": raw_results_total,
         "count": len(all_results),
         "articles": all_results,
         "query_details": query_stats,
+        "diagnostics": build_filter_diagnostics(
+            topic_id, must_include, exclude, raw_results_total, len(all_results),
+            rejection_counts, review_candidates
+        ),
     }
 
 

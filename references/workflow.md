@@ -29,6 +29,8 @@ Use `scripts/fetch-web.py` when search-based coverage is needed for topics that 
 
 Do not automatically run both if the task is narrow. Prefer targeted collection.
 
+If `fetch-web.py` returns `status: "filtered_empty"` for a topic, do not treat that as a search backend failure. It means raw results were found but the topic filters excluded them. Inspect the topic diagnostics and review candidates before changing queries or giving up on the topic.
+
 Save intermediate outputs explicitly, for example:
 
 ```bash
