@@ -178,6 +178,16 @@ class MarkdownParser:
             )
             return
 
+        # H4: #### Item heading
+        if stripped.startswith('#### '):
+            self._close_list_if_needed()
+            section = escape(stripped[5:])
+            self.html_parts.append(
+                f'<h4 style="font-size:15px;font-weight:600;color:#111827;'
+                f'margin-top:16px;margin-bottom:8px">{section}</h4>'
+            )
+            return
+
         # Blockquote: > text
         if stripped.startswith('> '):
             self._close_list_if_needed()
@@ -195,8 +205,8 @@ class MarkdownParser:
             self.html_parts.append('<hr style="border:none;border-top:1px solid #e5e7eb;margin:24px 0">')
             return
 
-        # Bullet items: • or -
-        if stripped.startswith('• ') or stripped.startswith('- '):
+        # Bullet items: •, -, or *
+        if stripped.startswith('• ') or stripped.startswith('- ') or stripped.startswith('* '):
             self._handle_list_item(stripped)
             return
 
@@ -291,7 +301,12 @@ class MarkdownParser:
 
     def _handle_list_item(self, line: str):
         """Handle a list item."""
-        char = '•' if '•' in line[:2] else '-'
+        if line.startswith('• '):
+            char = '•'
+        elif line.startswith('* '):
+            char = '*'
+        else:
+            char = '-'
 
         if not self.in_list:
             self.html_parts.append(

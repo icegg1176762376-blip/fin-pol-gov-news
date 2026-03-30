@@ -162,11 +162,45 @@ def strip_html_tags(html: str) -> str:
     return text[:500]
 
 
+def get_editorial_note(article: Dict[str, Any]) -> str:
+    """Get the best available AI/editorial note for an article."""
+    for key in (
+        'editorial_note',
+        'ai_commentary',
+        'ai_note',
+        'commentary',
+        'analysis',
+        'note',
+    ):
+        value = article.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ''
+
+
+def get_editorial_alert(article: Dict[str, Any]) -> str:
+    """Get a warning/reminder style note when available."""
+    for key in (
+        'editorial_alert',
+        'alert',
+        'warning',
+        'reminder',
+        'risk_note',
+    ):
+        value = article.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ''
+
+
 class ReportGenerator:
     """Generate detailed markdown report."""
 
-    def __init__(self, data: Dict[str, Any]):
+    def __init__(self, data: Dict[str, Any], rss_data: Optional[Dict[str, Any]] = None,
+                 web_data: Optional[Dict[str, Any]] = None):
         self.data = data
+        self.rss_data = rss_data or {}
+        self.web_data = web_data or {}
         self.articles = self._extract_articles()
         self.categorized = self._categorize_articles()
         self.stats = self._calculate_stats()
@@ -224,16 +258,51 @@ class ReportGenerator:
 
         return stats
 
+    def _categorize_source_region(self, name: str, url: str) -> str:
+        article_like = {'source': name or '', 'link': url or ''}
+        return categorize_article(article_like)['region']
+
+    def _get_region_empty_reason(self, region: str) -> str:
+        rss_sources = []
+        for source in self.rss_data.get('sources', []) if isinstance(self.rss_data, dict) else []:
+            source_region = self._categorize_source_region(source.get('name', ''), source.get('url', ''))
+            if source_region == region:
+                rss_sources.append(source)
+
+        rss_errors = [s for s in rss_sources if s.get('status') != 'ok']
+        rss_ok_zero = [s for s in rss_sources if s.get('status') == 'ok' and int(s.get('count', 0) or 0) == 0]
+        rss_ok_nonzero = [s for s in rss_sources if s.get('status') == 'ok' and int(s.get('count', 0) or 0) > 0]
+
+        web_topics = self.web_data.get('topics', []) if isinstance(self.web_data, dict) else []
+        filtered_empty_topics = [t for t in web_topics if t.get('status') == 'filtered_empty']
+        web_error_topics = [t for t in web_topics if t.get('status') == 'error']
+        web_ok_topics = [t for t in web_topics if t.get('status') in ('ok', 'filtered_empty')]
+
+        if rss_sources and len(rss_errors) == len(rss_sources):
+            return '抓取异常：相关 RSS 源本轮未成功返回结果。'
+
+        if rss_ok_nonzero:
+            return '48小时内该分类未形成可汇报条目，可能已在其他分类呈现。'
+
+        if rss_sources and rss_ok_zero and not rss_errors:
+            if filtered_empty_topics:
+                return '48小时内相关 RSS 无新消息，且 Web 检索结果被筛选规则全部排除。'
+            return '48小时内无新消息。'
+
+        if filtered_empty_topics and not web_error_topics:
+            return 'Web 检索有候选结果，但本轮被筛选规则全部排除。'
+
+        if web_error_topics and not web_ok_topics and not rss_sources:
+            return '抓取异常：相关 Web 检索本轮未取得有效结果。'
+
+        return '48小时内无新消息，或未检索到有效结果。'
+
     def generate(self) -> str:
         """Generate the complete markdown report."""
         lines = []
 
         # Header
         lines.extend(self._generate_header())
-        lines.append('')
-
-        # Stats table
-        lines.extend(self._generate_stats_table())
         lines.append('')
 
         # Top articles
@@ -243,9 +312,12 @@ class ReportGenerator:
         # Regional sections
         region_order = ['深圳', '北京', '广东', '金融监管', '学习强国', '其他']
         for region in region_order:
-            if region in self.categorized:
-                lines.extend(self._generate_region_section(region))
-                lines.append('')
+            lines.extend(self._generate_region_section(region))
+            lines.append('')
+
+        # Put the stats table at the end so the narrative comes first
+        lines.extend(self._generate_stats_table())
+        lines.append('')
 
         # Footer
         lines.extend(self._generate_footer())
@@ -331,16 +403,22 @@ class ReportGenerator:
             source = article.get('source', '未知')
             article_type = article.get('_type', '其他')
             published = format_date(article.get('published', ''))
-            summary = truncate_text(strip_html_tags(article.get('content', '') or article.get('summary', '')), 120)
+            summary = truncate_text(strip_html_tags(article.get('content', '') or article.get('summary', '')), 260)
             link = article.get('link', '')
+            editorial_note = truncate_text(strip_html_tags(get_editorial_note(article)), 180)
+            editorial_alert = truncate_text(strip_html_tags(get_editorial_alert(article)), 120)
 
-            lines.append(f' {i}. {title}')
+            lines.append(f'### {i}. {title}')
             lines.append('')
             lines.append(f'- 📅 时间: {published}')
             lines.append(f'- 🏛️ 来源: {source}')
             lines.append(f'- 📄 类型: {article_type}')
             if summary:
-                lines.append(f'- 📝 摘要: {summary}')
+                lines.append(f'- 📝 原文摘要: {summary}')
+            if editorial_note:
+                lines.append(f'- 💡 点评: {editorial_note}')
+            if editorial_alert:
+                lines.append(f'- ⚠️ 提醒: {editorial_alert}')
             if link:
                 lines.append(f'- 🔗 链接: [{link}]({link})')
             lines.append('')
@@ -372,7 +450,7 @@ class ReportGenerator:
             lines.append('')
 
         if not has_content:
-            lines.append('*暂无新动态*')
+            lines.append(f'*{self._get_region_empty_reason(region)}*')
             lines.append('')
 
         return lines
@@ -387,15 +465,21 @@ class ReportGenerator:
             source = article.get('source', '未知')
             # Get content from either 'content' or 'summary' field
             content = article.get('content', '') or article.get('summary', '')
-            summary = truncate_text(strip_html_tags(content), 100)
+            summary = truncate_text(strip_html_tags(content), 320)
             link = article.get('link', '')
+            editorial_note = truncate_text(strip_html_tags(get_editorial_note(article)), 220)
+            editorial_alert = truncate_text(strip_html_tags(get_editorial_alert(article)), 140)
 
-            lines.append(f' {title}')
+            lines.append(f'#### {title}')
             lines.append('')
             lines.append(f'- 📅 时间: {published}')
             lines.append(f'- 🏛️ 来源: {source}')
             if summary:
-                lines.append(f'- 📝 摘要: {summary}')
+                lines.append(f'- 📝 原文摘要: {summary}')
+            if editorial_note:
+                lines.append(f'- 💡 点评: {editorial_note}')
+            if editorial_alert:
+                lines.append(f'- ⚠️ 提醒: {editorial_alert}')
             if link:
                 lines.append(f'- 🔗 链接: [查看原文]({link})')
             lines.append('')
@@ -453,6 +537,8 @@ def main():
     )
     parser.add_argument("--input", "-i", required=True, type=Path, help="Input JSON file")
     parser.add_argument("--output", "-o", required=True, type=Path, help="Output markdown file")
+    parser.add_argument("--rss-input", type=Path, help="Optional RSS raw output JSON for empty-state diagnostics")
+    parser.add_argument("--web-input", type=Path, help="Optional Web raw output JSON for empty-state diagnostics")
     parser.add_argument("--verbose", "-v", action="store_true")
     args = parser.parse_args()
 
@@ -469,7 +555,16 @@ def main():
     with open(args.input, 'r', encoding='utf-8') as f:
         data = json.load(f)
 
-    generator = ReportGenerator(data)
+    rss_data = None
+    web_data = None
+    if args.rss_input and args.rss_input.exists():
+        with open(args.rss_input, 'r', encoding='utf-8') as f:
+            rss_data = json.load(f)
+    if args.web_input and args.web_input.exists():
+        with open(args.web_input, 'r', encoding='utf-8') as f:
+            web_data = json.load(f)
+
+    generator = ReportGenerator(data, rss_data=rss_data, web_data=web_data)
     report = generator.generate()
 
     with open(args.output, 'w', encoding='utf-8') as f:
