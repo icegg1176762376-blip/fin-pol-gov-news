@@ -62,7 +62,7 @@ When reading merged JSON:
 - treat multi-source presence as a confidence signal, not automatic importance
 - if needed, use `scripts/summarize-merged.py` to reduce context load
 - if needed, use `scripts/enrich-articles.py` to deepen only the top candidates
-- write the final markdown directly with AI using `references/report-template.md` as the default structure
+- write the final markdown directly with AI using `assets/template.md` as the default structure
 - normalize incomplete titles or source labels only when the article text clearly supports the cleanup
 - flag uncertainty instead of guessing when article metadata is thin
 

@@ -83,8 +83,8 @@ The default path is now:
 - enrich
 - AI report synthesis
 
-The agent should read the merged and enriched data, then write the actual report from scratch using the reference template in `references/report-template.md`.
-For stricter execution rules around input fields, normalization, commentary, time display, and no-guessing behavior, follow `references/report-generation-spec.md`.
+The agent should read the merged and enriched data, then write the actual report from scratch using the reference template in `assets/template.md`.
+For stricter execution rules around input fields, normalization, commentary, time display, no-guessing behavior, and template-backed sections such as data overview, follow `references/report-generation-spec.md`.
 
 The agent, not a formatter script, is responsible for:
 - choosing the lead items
@@ -144,4 +144,4 @@ Resend configuration:
 - If the user asks for "what happened today" or "produce a brief": collect, review, merge, enrich the top items if needed, then write the report directly with AI.
 - If the user asks "why is source X missing": validate config, fetch narrowly, inspect raw output, then merge only if needed.
 - If the user asks to improve ranking or classification: inspect `merge-sources.py`, then test with saved outputs.
-- If the user asks to change final format or distribution: focus first on `references/report-template.md`, then `sanitize-html.py`, `generate-pdf.py`, and `send-email.py`.
+- If the user asks to change final format or distribution: focus first on `assets/template.md`, then `sanitize-html.py`, `generate-pdf.py`, and `send-email.py`.

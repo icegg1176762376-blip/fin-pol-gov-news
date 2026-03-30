@@ -40,6 +40,6 @@ Use this skill to run an AI-led newsroom workflow. Do not default to a fully aut
 - Pause after fetch and after merge to inspect outputs.
 - Use `scripts/summarize-merged.py` to shrink large merged JSON before reasoning when helpful.
 - Use `scripts/enrich-articles.py` only for high-value items that need deeper reading.
-- Use `references/report-template.md` as the default structure for AI-written markdown reports.
+- Use `assets/template.md` as the default structure for AI-written markdown reports.
 - Use delivery scripts only after the markdown report is editorially complete.
 - Prefer the delivery chain `sanitize-html.py` -> optional `generate-pdf.py` -> `send-email.py --provider resend` when the user wants email distribution.
