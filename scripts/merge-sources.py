@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
-Merge data from all sources (RSS, Twitter, Web) with quality scoring.
+Merge collected finance-policy sources into a scored candidate set.
 
-Reads output from fetch-rss.py, fetch-twitter.py, and fetch-web.py,
-merges articles, removes duplicates, applies quality scoring, and
-groups by topics for final digest output.
+Reads output from fetch-rss.py and fetch-web.py by default, with optional
+backward-compatible support for older source types. Merges articles, removes
+duplicates, applies quality scoring, and groups by topics for editorial review.
 
 Usage:
-    python3 merge-sources.py [--rss FILE] [--twitter FILE] [--web FILE] [--output FILE] [--verbose]
+    python3 merge-sources.py [--rss FILE] [--web FILE] [--output FILE] [--verbose]
 """
 
 import json
@@ -118,7 +118,7 @@ def calculate_base_score(article: Dict[str, Any], source: Dict[str, Any]) -> flo
     # Recency bonus (< 24 hours)
     try:
         article_date = datetime.fromisoformat(article["date"].replace('Z', '+00:00'))
-        hours_old = (datetime.now(timezone.utc) - article_date).total_seconds() / 3600
+        hours_old = (datetime.now(CHINA_TZ) - article_date).total_seconds() / 3600
         if hours_old < 24:
             score += SCORE_RECENT
     except Exception:
@@ -336,7 +336,7 @@ def load_previous_digests(archive_dir: Path, days: int = 14) -> Set[str]:
         return set()
         
     seen_titles = set()
-    cutoff = datetime.now() - timedelta(days=days)
+    cutoff = datetime.now(CHINA_TZ) - timedelta(days=days)
     
     try:
         for file_path in archive_dir.glob("*.md"):
@@ -383,6 +383,94 @@ def apply_previous_digest_penalty(articles: List[Dict[str, Any]],
             
     logging.info(f"Applied previous digest penalty to {penalized_count} articles")
     return articles
+
+
+# Sent articles tracking
+SENT_ARTICLES_DEFAULT_PATH = "/tmp/fin-pol-sent-articles.json"
+
+
+def load_sent_articles(sent_file: Optional[Path] = None) -> Set[str]:
+    """Load set of article IDs that have been sent.
+
+    Articles are identified by a combination of normalized title and source domain.
+    """
+    if sent_file is None:
+        sent_file = Path(SENT_ARTICLES_DEFAULT_PATH)
+
+    if not sent_file.exists():
+        return set()
+
+    try:
+        with open(sent_file, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        # Each entry is a string like "normalized_title|source_domain"
+        return set(data.get("sent_articles", []))
+    except (json.JSONDecodeError, OSError) as e:
+        logging.warning(f"Failed to load sent articles file: {e}")
+        return set()
+
+
+def generate_article_id(article: Dict[str, Any]) -> str:
+    """Generate a unique ID for an article based on title and source domain."""
+    norm_title = normalize_title(article.get("title", ""))
+    link = article.get("link", "")
+
+    # Extract domain from link
+    domain = ""
+    try:
+        from urllib.parse import urlparse
+        domain = urlparse(link).netloc.lower().replace("www.", "")
+    except Exception:
+        pass
+
+    # Use source as fallback if no domain
+    if not domain:
+        domain = article.get("source", "unknown")
+
+    return f"{norm_title}|{domain}"
+
+
+def filter_sent_articles(articles: List[Dict[str, Any]], sent_ids: Set[str]) -> List[Dict[str, Any]]:
+    """Filter out articles that have already been sent.
+
+    Returns a new list with only unsent articles.
+    """
+    filtered = []
+    filtered_count = 0
+
+    for article in articles:
+        article_id = generate_article_id(article)
+        if article_id in sent_ids:
+            filtered_count += 1
+            logging.debug(f"Filtering sent article: {article.get('title', '')[:50]}...")
+        else:
+            filtered.append(article)
+
+    logging.info(f"Filtered out {filtered_count} previously sent articles")
+    return filtered
+
+
+def save_sent_articles(sent_ids: Set[str], sent_file: Optional[Path] = None) -> None:
+    """Save the set of sent article IDs to file."""
+    if sent_file is None:
+        sent_file = Path(SENT_ARTICLES_DEFAULT_PATH)
+
+    try:
+        # Create parent directory if needed
+        sent_file.parent.mkdir(parents=True, exist_ok=True)
+
+        data = {
+            "updated": datetime.now(CHINA_TZ).isoformat(),
+            "count": len(sent_ids),
+            "sent_articles": sorted(sent_ids)
+        }
+
+        with open(sent_file, 'w', encoding='utf-8') as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+
+        logging.info(f"Saved {len(sent_ids)} sent article IDs to {sent_file}")
+    except Exception as e:
+        logging.warning(f"Failed to save sent articles file: {e}")
 
 
 def group_by_topics(articles: List[Dict[str, Any]], dedup_across_topics: bool = True) -> Dict[str, List[Dict[str, Any]]]:
@@ -452,13 +540,13 @@ def group_by_topics(articles: List[Dict[str, Any]], dedup_across_topics: bool = 
 def main():
     """Main merge and scoring function."""
     parser = argparse.ArgumentParser(
-        description="Merge articles from all sources with quality scoring and deduplication.",
+        description="Merge collected outputs into a scored candidate set with deduplication.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-    python3 merge-sources.py --rss rss.json --twitter twitter.json --web web.json
+    python3 merge-sources.py --rss rss.json --web web.json
     python3 merge-sources.py --rss rss.json --output merged.json --verbose
-    python3 merge-sources.py --archive-dir workspace/archive/tech-digest
+    python3 merge-sources.py --archive-dir workspace/archive/fin-pol-gov-news
         """
     )
     
@@ -471,7 +559,7 @@ Examples:
     parser.add_argument(
         "--twitter",
         type=Path,
-        help="Twitter fetch results JSON file"
+        help="Legacy Twitter fetch results JSON file"
     )
     
     parser.add_argument(
@@ -483,19 +571,19 @@ Examples:
     parser.add_argument(
         "--github",
         type=Path,
-        help="GitHub releases results JSON file"
+        help="Legacy GitHub releases results JSON file"
     )
     
     parser.add_argument(
         "--trending",
         type=Path,
-        help="GitHub trending repos JSON file"
+        help="Legacy GitHub trending repos JSON file"
     )
     
     parser.add_argument(
         "--reddit",
         type=Path,
-        help="Reddit posts results JSON file"
+        help="Legacy Reddit posts results JSON file"
     )
     
     parser.add_argument(
@@ -509,19 +597,32 @@ Examples:
         type=Path,
         help="Archive directory for previous digest penalty"
     )
-    
+
+    parser.add_argument(
+        "--sent-articles",
+        type=Path,
+        default=Path(SENT_ARTICLES_DEFAULT_PATH),
+        help=f"Path to JSON file tracking sent articles (default: {SENT_ARTICLES_DEFAULT_PATH})"
+    )
+
+    parser.add_argument(
+        "--mark-as-sent",
+        action="store_true",
+        help="Mark articles in the output as sent (update sent articles file)"
+    )
+
     parser.add_argument(
         "--verbose", "-v",
         action="store_true",
         help="Enable verbose logging"
     )
-    
+
     args = parser.parse_args()
     logger = setup_logging(args.verbose)
     
     # Auto-generate unique output path if not specified
     if not args.output:
-        fd, temp_path = tempfile.mkstemp(prefix="tech-news-digest-merged-", suffix=".json")
+        fd, temp_path = tempfile.mkstemp(prefix="fin-pol-gov-news-merged-", suffix=".json")
         os.close(fd)
         args.output = Path(temp_path)
     
@@ -542,31 +643,64 @@ Examples:
         
         # Collect all articles with source context
         all_articles = []
-        
+
+        # Helper to normalize article fields
+        def normalize_article(article: Dict[str, Any], source_name: str, source_type: str) -> Dict[str, Any]:
+            """Normalize article fields for consistency across sources."""
+            # Normalize date fields - use 'published' as the standard field
+            if "published" not in article:
+                if "date" in article and article["date"]:
+                    article["published"] = article["date"]
+                elif "pub_date" in article and article["pub_date"]:
+                    article["published"] = article["pub_date"]
+                else:
+                    article["published"] = datetime.now(CHINA_TZ).isoformat()
+
+            # Normalize summary/content fields
+            if "summary" not in article or not article["summary"]:
+                if "snippet" in article and article["snippet"]:
+                    article["summary"] = article["snippet"]
+                elif "description" in article and article["description"]:
+                    article["summary"] = article["description"]
+                elif "content" in article and article["content"]:
+                    article["summary"] = article["content"]
+
+            # Ensure source field uses the display name, not channel type
+            article["source"] = source_name
+
+            return article
+
         # Process RSS articles
         for source in rss_data.get("sources", []):
+            source_name = source.get("name", "")
             for article in source.get("articles", []):
+                article = normalize_article(article.copy(), source_name, "rss")
                 article["source_type"] = "rss"
-                article["source_name"] = source.get("name", "")
+                article["source_name"] = source_name
                 article["source_id"] = source.get("source_id", "")
                 article["quality_score"] = calculate_base_score(article, source)
                 all_articles.append(article)
-        
+
         # Process Twitter articles
         for source in twitter_data.get("sources", []):
+            source_name = f"@{source.get('handle', '')}"
             for article in source.get("articles", []):
+                article = normalize_article(article.copy(), source_name, "twitter")
                 article["source_type"] = "twitter"
-                article["source_name"] = f"@{source.get('handle', '')}"
+                article["source_name"] = source_name
                 article["display_name"] = source.get("name", "")
                 article["source_id"] = source.get("source_id", "")
                 article["quality_score"] = calculate_base_score(article, source)
                 all_articles.append(article)
-        
+
         # Process Web articles
         for topic_result in web_data.get("topics", []):
             for article in topic_result.get("articles", []):
+                # For web articles, source should be the domain (already set in fetch-web.py)
+                source_name = article.get("source", "Web Search")
+                article = normalize_article(article.copy(), source_name, "web")
                 article["source_type"] = "web"
-                article["source_name"] = "Web Search"
+                article["source_name"] = source_name
                 article["source_id"] = f"web-{topic_result.get('topic_id', '')}"
                 # Build a minimal source dict so web articles go through the same scoring
                 web_source = {
@@ -575,21 +709,25 @@ Examples:
                 }
                 article["quality_score"] = calculate_base_score(article, web_source)
                 all_articles.append(article)
-        
+
         # Process GitHub articles
         for source in github_data.get("sources", []):
+            source_name = source.get("name", "")
             for article in source.get("articles", []):
+                article = normalize_article(article.copy(), source_name, "github")
                 article["source_type"] = "github"
-                article["source_name"] = source.get("name", "")
+                article["source_name"] = source_name
                 article["source_id"] = source.get("source_id", "")
                 article["quality_score"] = calculate_base_score(article, source)
                 all_articles.append(article)
-        
+
         # Process Reddit articles
         for source in reddit_data.get("subreddits", []):
+            source_name = f"r/{source.get('subreddit', '')}"
             for article in source.get("articles", []):
+                article = normalize_article(article.copy(), source_name, "reddit")
                 article["source_type"] = "reddit"
-                article["source_name"] = f"r/{source.get('subreddit', '')}"
+                article["source_name"] = source_name
                 article["source_id"] = source.get("source_id", "")
                 reddit_source = {
                     "source_type": "reddit",
@@ -615,24 +753,34 @@ Examples:
                     "link": repo.get("url", f"https://github.com/{repo['repo']}"),
                     "snippet": repo.get("description", ""),
                     "date": repo.get("pushed_at", ""),
-                    "source": "github-trending",
+                    "source": "github.com",
                     "source_type": "github_trending",
                     "topics": repo.get("topics", []),
                     "stars": repo.get("stars", 0),
                     "daily_stars_est": repo.get("daily_stars_est", 0),
-                    "forks": repo.get("forks", 0),
-                    "language": repo.get("language", ""),
-                    "quality_score": 5 + min(10, repo.get("daily_stars_est", 0) // 10),
                 }
+                # Normalize fields
+                article = normalize_article(article, "github.com", "github_trending")
+                article["quality_score"] = 5 + min(10, repo.get("daily_stars_est", 0) // 10)
                 all_articles.append(article)
+
         total_collected = len(all_articles)
         logger.info(f"Total articles collected: {total_collected}")
-        
+
         # Load previous digest titles for penalty
         previous_titles = set()
         if args.archive_dir:
             previous_titles = load_previous_digests(args.archive_dir)
-        
+
+        # Load sent articles and filter them out
+        sent_articles_file = args.sent_articles if hasattr(args, 'sent_articles') else None
+        sent_ids = load_sent_articles(sent_articles_file)
+        if sent_ids:
+            before_filter = len(all_articles)
+            all_articles = filter_sent_articles(all_articles, sent_ids)
+            after_filter = len(all_articles)
+            logger.info(f"Sent articles filter: {before_filter} → {after_filter}")
+
         # Apply previous digest penalty
         all_articles = apply_previous_digest_penalty(all_articles, previous_titles)
         
@@ -661,7 +809,7 @@ Examples:
         topic_counts = {topic: len(articles) for topic, articles in topic_groups.items()}
         
         output = {
-            "generated": datetime.now(timezone.utc).isoformat(),
+            "generated": datetime.now(CHINA_TZ).isoformat(),
             "input_sources": {
                 "rss_articles": rss_data.get("total_articles", 0),
                 "twitter_articles": twitter_data.get("total_articles", 0),
@@ -689,12 +837,24 @@ Examples:
                 } for topic, articles in topic_groups.items()
             }
         }
-        
+
         # Write output
         json_str = json.dumps(output, ensure_ascii=False, indent=2)
         with open(args.output, "w", encoding='utf-8') as f:
             f.write(json_str)
-        
+
+        # Mark articles as sent if requested
+        if getattr(args, 'mark_as_sent', False):
+            # Collect all article IDs from output
+            new_sent_ids = set()
+            for topic_data in topic_groups.values():
+                for article in topic_data:
+                    new_sent_ids.add(generate_article_id(article))
+            # Merge with existing sent IDs and save
+            all_sent_ids = sent_ids | new_sent_ids
+            save_sent_articles(all_sent_ids, args.sent_articles)
+            logger.info(f"   Marked {len(new_sent_ids)} articles as sent")
+
         logger.info(f"✅ Merged and scored articles:")
         logger.info(f"   Input: {total_collected} articles")
         logger.info(f"   Output: {total_after_domain_limits} articles across {len(topic_groups)} topics")

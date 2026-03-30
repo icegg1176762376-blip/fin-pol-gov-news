@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Fetch web search results for tech digest topics.
+Fetch web search results for fin-pol-gov-news topics.
 
 Reads topics.json, performs web searches for each topic's search queries,
 and outputs structured JSON with search results tagged by topics.
@@ -20,13 +20,16 @@ import logging
 import time
 import tempfile
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Dict, List, Any, Optional, Tuple
 from urllib.request import urlopen, Request
 from urllib.error import HTTPError
 from urllib.parse import urlencode
+
+# China Standard Time (UTC+8)
+CHINA_TZ = timezone(timedelta(hours=8))
 
 TIMEOUT = 30
 MAX_RESULTS_PER_QUERY = 5
@@ -36,7 +39,7 @@ RETRY_DELAY = 2.0
 # Brave Search API
 BRAVE_API_BASE = "https://api.search.brave.com/res/v1/web/search"
 TAVILY_API_BASE = "https://api.tavily.com/search"
-BRAVE_RATE_LIMIT_CACHE = "/tmp/tech-news-digest-brave-rate-limit.json"
+BRAVE_RATE_LIMIT_CACHE = "/tmp/fin-pol-gov-news-brave-rate-limit.json"
 
 
 def setup_logging(verbose: bool) -> logging.Logger:
@@ -78,7 +81,7 @@ def _probe_brave_key(api_key: str) -> Dict[str, Any]:
         req = Request(url, headers={
             'Accept': 'application/json',
             'X-Subscription-Token': api_key,
-            'User-Agent': 'TechDigest/2.0'
+            'User-Agent': 'FinPolGovNews/2.0'
         })
         with urlopen(req, timeout=TIMEOUT) as resp:
             limit_header = resp.headers.get('x-ratelimit-limit', '1')
@@ -206,7 +209,7 @@ def _brave_search_single(query: str, api_key: str, freshness: Optional[str] = No
     headers = {
         'Accept': 'application/json',
         'X-Subscription-Token': api_key,
-        'User-Agent': 'TechDigest/2.0'
+        'User-Agent': 'FinPolGovNews/2.0'
     }
     
     req = Request(url, headers=headers)
@@ -221,11 +224,17 @@ def _brave_search_single(query: str, api_key: str, freshness: Optional[str] = No
     results = []
     if 'web' in data and 'results' in data['web']:
         for result in data['web']['results']:
+            url = result.get('url', '')
+            # Extract domain from URL for source
+            from urllib.parse import urlparse
+            domain = urlparse(url).netloc.replace('www.', '') if url else '未知来源'
+
             results.append({
                 'title': result.get('title', ''),
-                'link': result.get('url', ''),
+                'link': url,
                 'snippet': result.get('description', ''),
-                'date': datetime.now(timezone.utc).isoformat()
+                'date': datetime.now(CHINA_TZ).isoformat(),
+                'source': domain,
             })
             
     return {
@@ -291,18 +300,22 @@ def filter_content(text: str, must_include: List[str], exclude: List[str]) -> bo
 
 
 def search_topic_brave(topic: Dict[str, Any], api_key: str, freshness: Optional[str] = None,
-                       max_workers: int = 1, delay: float = 0.5) -> Dict[str, Any]:
+                       max_workers: int = 1, delay: float = 0.5, hours: int = 48) -> Dict[str, Any]:
     """Search all queries for a topic using Brave API.
-    
+
     Args:
         max_workers: Number of parallel search threads (1 = sequential)
         delay: Delay between requests in sequential mode (ignored when parallel)
+        hours: Time window in hours for filtering results (default: 48)
     """
     topic_id = topic["id"]
     queries = topic["search"]["queries"]
     must_include = topic["search"].get("must_include", [])
     exclude = topic["search"].get("exclude", [])
-    
+
+    # Calculate cutoff date for filtering
+    cutoff = datetime.now(CHINA_TZ) - timedelta(hours=hours)
+
     all_results = []
     query_stats = []
     
@@ -318,6 +331,13 @@ def search_topic_brave(topic: Dict[str, Any], api_key: str, freshness: Optional[
                 })
                 if search_result['status'] == 'ok':
                     for result in search_result['results']:
+                        # Filter: require valid published date within time window
+                        try:
+                            pub_date = datetime.fromisoformat(result.get('date', '').replace('Z', '+00:00'))
+                            if pub_date < cutoff:
+                                continue  # Too old
+                        except (ValueError, AttributeError):
+                            continue  # No valid date, skip
                         combined_text = f"{result['title']} {result['snippet']}"
                         if filter_content(combined_text, must_include, exclude):
                             result['topics'] = [topic_id]
@@ -332,6 +352,13 @@ def search_topic_brave(topic: Dict[str, Any], api_key: str, freshness: Optional[
             })
             if search_result['status'] == 'ok':
                 for result in search_result['results']:
+                    # Filter: require valid published date within time window
+                    try:
+                        pub_date = datetime.fromisoformat(result.get('date', '').replace('Z', '+00:00'))
+                        if pub_date < cutoff:
+                            continue  # Too old
+                    except (ValueError, AttributeError):
+                        continue  # No valid date, skip
                     combined_text = f"{result['title']} {result['snippet']}"
                     if filter_content(combined_text, must_include, exclude):
                         result['topics'] = [topic_id]
@@ -379,19 +406,24 @@ def search_tavily(query: str, api_key: str, topic: str = "general",
         data = json.dumps(payload).encode()
         req = Request(TAVILY_API_BASE, data=data, headers={
             "Content-Type": "application/json",
-            "User-Agent": "TechDigest/3.0"
+            "User-Agent": "FinPolGovNews/3.0"
         }, method="POST")
         with urlopen(req, timeout=TIMEOUT) as resp:
             result = json.loads(resp.read().decode())
 
         articles = []
         for r in result.get("results", []):
+            url = r.get("url", "")
+            # Extract domain from URL for source
+            from urllib.parse import urlparse
+            domain = urlparse(url).netloc.replace('www.', '') if url else '未知来源'
+
             articles.append({
                 "title": r.get("title", ""),
-                "link": r.get("url", ""),
+                "link": url,
                 "snippet": r.get("content", "")[:300],
                 "date": r.get("published_date", ""),
-                "source": "tavily",
+                "source": domain,
             })
 
         return {
@@ -408,12 +440,20 @@ def search_tavily(query: str, api_key: str, topic: str = "general",
         return {"query": query, "status": "error", "total": 0, "results": [], "error": str(e)}
 
 
-def search_topic_tavily(topic: Dict[str, Any], api_key: str, days: Optional[int] = None) -> Dict[str, Any]:
-    """Search all queries for a topic using Tavily API."""
+def search_topic_tavily(topic: Dict[str, Any], api_key: str, days: Optional[int] = None, hours: int = 48) -> Dict[str, Any]:
+    """Search all queries for a topic using Tavily API.
+
+    Args:
+        days: Limit results to the last N days (passed to Tavily API)
+        hours: Additional client-side filtering in hours (default: 48)
+    """
     topic_id = topic["id"]
     queries = topic["search"]["queries"]
     must_include = topic["search"].get("must_include", [])
     exclude = topic["search"].get("exclude", [])
+
+    # Calculate cutoff date for additional client-side filtering
+    cutoff = datetime.now(CHINA_TZ) - timedelta(hours=hours)
 
     all_results = []
     query_stats = []
@@ -427,6 +467,18 @@ def search_topic_tavily(topic: Dict[str, Any], api_key: str, days: Optional[int]
         })
         if search_result["status"] == "ok":
             for result in search_result["results"]:
+                # Filter: require valid published date within time window
+                date_str = result.get("date", "")
+                if not date_str:
+                    continue  # No date, skip
+                try:
+                    # Tavily returns dates in various formats, try ISO format
+                    pub_date = datetime.fromisoformat(date_str.replace('Z', '+00:00'))
+                    if pub_date < cutoff:
+                        continue  # Too old
+                except (ValueError, AttributeError):
+                    # If date parsing fails, skip this result
+                    continue
                 combined_text = f"{result['title']} {result['snippet']}"
                 if filter_content(combined_text, must_include, exclude):
                     result["topics"] = [topic_id]
@@ -502,7 +554,7 @@ def convert_freshness(hours: int) -> str:
 def main():
     """Main web search function."""
     parser = argparse.ArgumentParser(
-        description="Perform web searches for tech digest topics. "
+        description="Perform web searches for fin-pol-gov-news topics. "
                    "Can use Brave Search API (BRAVE_API_KEY) or generate interface for agents.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
@@ -570,7 +622,7 @@ Examples:
     
     # Auto-generate unique output path if not specified
     if not args.output:
-        fd, temp_path = tempfile.mkstemp(prefix="tech-news-digest-web-", suffix=".json")
+        fd, temp_path = tempfile.mkstemp(prefix="fin-pol-gov-news-web-", suffix=".json")
         os.close(fd)
         args.output = Path(temp_path)
     
@@ -637,7 +689,7 @@ Examples:
             ok_topics = sum(1 for r in results if r["status"] == "ok")
             
             output = {
-                "generated": datetime.now(timezone.utc).isoformat(),
+                "generated": datetime.now(CHINA_TZ).isoformat(),
                 "source_type": "web",
                 "defaults_dir": str(args.defaults),
                 "config_dir": str(args.config) if args.config else None,
@@ -694,7 +746,7 @@ Examples:
             ok_topics = sum(1 for r in results if r["status"] == "ok")
             
             output = {
-                "generated": datetime.now(timezone.utc).isoformat(),
+                "generated": datetime.now(CHINA_TZ).isoformat(),
                 "source_type": "web",
                 "defaults_dir": str(args.defaults),
                 "config_dir": str(args.config) if args.config else None,
@@ -720,7 +772,7 @@ Examples:
                 results.append(result)
             
             output = {
-                "generated": datetime.now(timezone.utc).isoformat(),
+                "generated": datetime.now(CHINA_TZ).isoformat(),
                 "source_type": "web",
                 "defaults_dir": str(args.defaults),
                 "config_dir": str(args.config) if args.config else None,

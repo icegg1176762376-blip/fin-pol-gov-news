@@ -28,6 +28,9 @@ from pathlib import Path
 from typing import Dict, List, Any, Optional
 import threading
 
+# China Standard Time (UTC+8)
+CHINA_TZ = timezone(timedelta(hours=8))
+
 # Use requests instead of urllib to fix SSL ECC issues
 import requests
 from requests.adapters import HTTPAdapter
@@ -396,7 +399,7 @@ def fetch_feed(source: Dict[str, Any], hours: int, retries: int = RETRY_COUNT, t
     not_modified = False
     final_url = feed_url
 
-    cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
+    cutoff = datetime.now(CHINA_TZ) - timedelta(hours=hours)
 
     for attempt in range(retries):
         try:
@@ -499,8 +502,13 @@ def fetch_feed(source: Dict[str, Any], hours: int, retries: int = RETRY_COUNT, t
                                     if published:
                                         break
 
-                        # Filter by date (skip if older than cutoff)
-                        if published is not None and published < cutoff:
+                        # Filter: skip if no published date (require exact date)
+                        if published is None:
+                            logging.debug(f"{source_name}: entry skipped - no published date")
+                            continue
+
+                        # Filter by date (skip if older than cutoff - 48 hours)
+                        if published < cutoff:
                             logging.debug(f"{source_name}: entry skipped - date too old: {published} < {cutoff}")
                             continue
 
@@ -530,7 +538,7 @@ def fetch_feed(source: Dict[str, Any], hours: int, retries: int = RETRY_COUNT, t
                         article = {
                             'title': title,
                             'link': link,
-                            'published': published.isoformat() if published else datetime.now(timezone(timedelta(hours=8))).isoformat(),
+                            'published': published.isoformat(),
                             'source': source_name,
                             'source_id': source_id,
                             'source_type': 'rss',
@@ -733,7 +741,7 @@ def main() -> int:
         args.output = Path(temp_path)
 
     try:
-        cutoff = datetime.now(timezone.utc) - timedelta(hours=args.hours)
+        cutoff = datetime.now(CHINA_TZ) - timedelta(hours=args.hours)
 
         # Backward compatibility
         if args.config and args.defaults == Path("config/defaults") and not args.defaults.exists():
@@ -782,7 +790,7 @@ def main() -> int:
         total_articles = sum(r.get("count", 0) for r in results)
 
         output = {
-            "generated": datetime.now(timezone.utc).isoformat(),
+            "generated": datetime.now(CHINA_TZ).isoformat(),
             "source_type": "rss",
             "defaults_dir": str(args.defaults),
             "config_dir": str(args.config) if args.config else None,

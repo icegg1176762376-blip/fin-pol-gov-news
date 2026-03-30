@@ -3,7 +3,7 @@
 Print a human-readable summary of merged JSON data for LLM consumption.
 
 Usage:
-    python3 summarize-merged.py [--input /tmp/td-merged.json] [--top N] [--topic TOPIC]
+    python3 summarize-merged.py [--input /tmp/fin-pol-merged.json] [--top N] [--topic TOPIC]
 """
 
 import json
@@ -83,7 +83,7 @@ def summarize(data: dict, top_n: int = 10, topic_filter: str = None):
 
 def main():
     parser = argparse.ArgumentParser(description="Summarize merged JSON for LLM consumption")
-    parser.add_argument("--input", "-i", type=Path, default=Path("/tmp/td-merged.json"))
+    parser.add_argument("--input", "-i", type=Path, default=Path("/tmp/fin-pol-merged.json"))
     parser.add_argument("--top", "-n", type=int, default=10, help="Top N articles per topic")
     parser.add_argument("--topic", "-t", type=str, default=None, help="Filter to specific topic")
     args = parser.parse_args()

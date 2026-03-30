@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Configuration overlay loader for tech-news-digest.
+Configuration overlay loader for fin-pol-gov-news.
 
 Handles loading and merging of default configurations with optional user overlays.
 Supports sources.json and topics.json with overlay logic for customization.
@@ -12,6 +12,22 @@ from pathlib import Path
 from typing import Dict, List, Optional, Any
 
 logger = logging.getLogger(__name__)
+
+SOURCE_OVERLAY_FILENAMES = [
+    "fin-pol-gov-news-sources.json",
+]
+
+TOPIC_OVERLAY_FILENAMES = [
+    "fin-pol-gov-news-topics.json",
+]
+
+
+def _find_overlay_file(config_dir: Path, candidates: List[str]) -> Optional[Path]:
+    for filename in candidates:
+        candidate = config_dir / filename
+        if candidate.exists():
+            return candidate
+    return None
 
 
 def load_merged_sources(defaults_dir: Path, config_dir: Optional[Path] = None) -> List[Dict[str, Any]]:
@@ -61,10 +77,13 @@ def load_merged_sources(defaults_dir: Path, config_dir: Optional[Path] = None) -
     if config_dir is None:
         return default_sources
         
-    config_path = config_dir / "tech-news-digest-sources.json"
+    config_path = _find_overlay_file(config_dir, SOURCE_OVERLAY_FILENAMES)
     
     # Try to load user overlay
     try:
+        if config_path is None:
+            logger.debug(f"No user sources config found in {config_dir}, using defaults only")
+            return default_sources
         with open(config_path, 'r', encoding='utf-8') as f:
             config_data = json.load(f)
         user_sources = config_data.get("sources", [])
@@ -160,10 +179,13 @@ def load_merged_topics(defaults_dir: Path, config_dir: Optional[Path] = None) ->
     if config_dir is None:
         return default_topics
         
-    config_path = config_dir / "tech-news-digest-topics.json"
+    config_path = _find_overlay_file(config_dir, TOPIC_OVERLAY_FILENAMES)
     
     # Try to load user overlay
     try:
+        if config_path is None:
+            logger.debug(f"No user topics config found in {config_dir}, using defaults only")
+            return default_topics
         with open(config_path, 'r', encoding='utf-8') as f:
             config_data = json.load(f)
         user_topics = config_data.get("topics", [])

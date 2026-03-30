@@ -5,6 +5,10 @@ Unified data collection pipeline for fin-pol-gov-news.
 Runs RSS and Web fetch steps, then merges + deduplicates + scores into a single output JSON.
 Optimized for government policy and financial regulation news.
 
+Note:
+    This script is kept for automation and backward-compatible batch runs.
+    The preferred skill workflow is agent-first and stage-by-stage.
+
 Usage:
     python3 run-pipeline.py \
         --defaults config/defaults \
@@ -152,6 +156,7 @@ def main() -> int:
 
     args = parser.parse_args()
     logger = setup_logging(args.verbose)
+    logger.warning("run-pipeline.py is a legacy automation shortcut; prefer the agent-first staged workflow for interactive analysis.")
 
     # Parse --skip and --only into sets
     skip_steps = set(s.strip().lower() for s in args.skip.split(',') if s.strip())

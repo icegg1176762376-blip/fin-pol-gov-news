@@ -19,12 +19,15 @@ import argparse
 import logging
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from html.parser import HTMLParser
 from pathlib import Path
 from typing import Dict, List, Any, Optional, Tuple
 from urllib.request import urlopen, Request
 from urllib.error import HTTPError, URLError
+
+# China Standard Time (UTC+8)
+CHINA_TZ = timezone(timedelta(hours=8))
 
 TIMEOUT = 10
 MAX_WORKERS = 5
@@ -236,7 +239,7 @@ def main():
         elapsed = time.time() - t0
 
         data["enrichment"] = {
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(CHINA_TZ).isoformat(),
             "attempted": attempted, "success": success, "cf_markdown": cf_count,
             "elapsed_s": round(elapsed, 1), "min_score": args.min_score, "max_chars": args.max_chars,
         }

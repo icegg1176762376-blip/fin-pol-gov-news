@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-Source health monitoring for tech-news-digest pipeline.
+Source health monitoring for fin-pol-gov-news collection outputs.
 
 Tracks per-source success/failure history and reports unhealthy sources.
 
 Usage:
-    python3 source-health.py --rss rss.json --twitter twitter.json --github github.json
+    python3 source-health.py --rss rss.json --web web.json
 """
 
 import json
@@ -15,9 +15,7 @@ import logging
 import time
 from pathlib import Path
 from typing import Dict, Any, Optional
-from datetime import datetime
-
-HEALTH_FILE = "/tmp/tech-news-digest-source-health.json"
+HEALTH_FILE = "/tmp/fin-pol-gov-news-source-health.json"
 HISTORY_DAYS = 7
 FAILURE_THRESHOLD = 0.5  # >50% failure rate triggers warning
 
@@ -52,30 +50,25 @@ def load_source_file(path: Optional[Path]) -> list:
         return []
 
 
-def load_source_file_flexible(path: Optional[Path]) -> list:
-    """Load sources from a JSON file, trying 'sources', 'subreddits', and 'topics' keys."""
+def load_web_topic_results(path: Optional[Path]) -> list:
+    """Load synthetic source records from fetch-web topic results."""
     if not path or not path.exists():
         return []
     try:
         with open(path, 'r') as f:
             data = json.load(f)
-        # Try standard keys
-        if "sources" in data:
-            return data["sources"]
-        if "subreddits" in data:
-            return data["subreddits"]
-        if "topics" in data:
-            # Create synthetic sources from topic results
-            synthetic = []
-            for topic in data["topics"]:
-                synthetic.append({
-                    "source_id": f"web-{topic.get('topic_id', 'unknown')}",
-                    "name": f"Web: {topic.get('topic_id', 'unknown')}",
-                    "status": topic.get("status", "ok"),
-                    "articles": topic.get("articles", []),
-                })
-            return synthetic
-        return []
+        topics = data.get("topics", [])
+        if not isinstance(topics, list):
+            return []
+        synthetic = []
+        for topic in topics:
+            synthetic.append({
+                "source_id": f"web-{topic.get('topic_id', 'unknown')}",
+                "name": f"Web: {topic.get('topic_id', 'unknown')}",
+                "status": topic.get("status", "ok"),
+                "articles": topic.get("articles", []),
+            })
+        return synthetic
     except (json.JSONDecodeError, OSError):
         return []
 
@@ -110,11 +103,8 @@ def report_unhealthy(health: Dict[str, Any], logger: logging.Logger) -> int:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Track source health for tech-news-digest pipeline.")
+    parser = argparse.ArgumentParser(description="Track source health for fin-pol-gov-news raw collection outputs.")
     parser.add_argument("--rss", type=Path, help="RSS output JSON")
-    parser.add_argument("--twitter", type=Path, help="Twitter output JSON")
-    parser.add_argument("--github", type=Path, help="GitHub output JSON")
-    parser.add_argument("--reddit", type=Path, help="Reddit output JSON")
     parser.add_argument("--web", type=Path, help="Web search output JSON")
     parser.add_argument("--verbose", "-v", action="store_true")
     args = parser.parse_args()
@@ -123,15 +113,13 @@ def main():
     health = load_health_data()
     now = time.time()
 
-    # Standard sources (use 'sources' key)
-    for path in [args.rss, args.twitter, args.github]:
+    for path in [args.rss]:
         sources = load_source_file(path)
         if sources:
             update_health(health, sources, now)
 
-    # Reddit and Web use flexible loading (subreddits/topics keys)
-    for path in [args.reddit, args.web]:
-        sources = load_source_file_flexible(path)
+    for path in [args.web]:
+        sources = load_web_topic_results(path)
         if sources:
             update_health(health, sources, now)
 

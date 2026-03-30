@@ -16,10 +16,14 @@ import argparse
 import json
 import logging
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Dict, List, Any, Optional
 from collections import defaultdict
+
+
+# China Standard Time (UTC+8)
+CHINA_TZ = timezone(timedelta(hours=8))
 
 
 # Source categories mapping
@@ -250,7 +254,7 @@ class ReportGenerator:
 
     def _generate_header(self) -> List[str]:
         """Generate report header."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(CHINA_TZ)
         date_str = now.strftime('%Y年%m月%d日')
         time_str = now.strftime('%H:%M')
 
@@ -323,17 +327,22 @@ class ReportGenerator:
         lines = ['## 🔥 核心焦点 (Top 5)', '']
 
         for i, article in enumerate(top_articles, 1):
-            title = escape_md_table(article.get('title', ''))[:60]
-            source = escape_md_table(article.get('source', '未知'))
+            title = article.get('title', '无标题')[:80]
+            source = article.get('source', '未知')
             article_type = article.get('_type', '其他')
             published = format_date(article.get('published', ''))
-            summary = truncate_text(strip_html_tags(article.get('content', '')), 80)
+            summary = truncate_text(strip_html_tags(article.get('content', '') or article.get('summary', '')), 120)
+            link = article.get('link', '')
 
-            lines.append(f'- **{i}. {title}**')
-            lines.append(f'  - 📅 时间：{published}')
-            lines.append(f'  - 🏛️ 来源：{source}')
-            lines.append(f'  - 📝 类型：{article_type}')
-            lines.append(f'  - 📝 摘要：{summary}')
+            lines.append(f' {i}. {title}')
+            lines.append('')
+            lines.append(f'- 📅 时间: {published}')
+            lines.append(f'- 🏛️ 来源: {source}')
+            lines.append(f'- 📄 类型: {article_type}')
+            if summary:
+                lines.append(f'- 📝 摘要: {summary}')
+            if link:
+                lines.append(f'- 🔗 链接: [{link}]({link})')
             lines.append('')
 
         return lines
@@ -358,8 +367,8 @@ class ReportGenerator:
             lines.append(f'### {self._type_emoji(article_type)} {article_type}')
             lines.append('')
 
-            # Generate table for this type
-            lines.extend(self._generate_article_table(types[article_type], article_type))
+            # Generate list for this type
+            lines.extend(self._generate_article_list(types[article_type], article_type))
             lines.append('')
 
         if not has_content:
@@ -368,38 +377,28 @@ class ReportGenerator:
 
         return lines
 
-    def _generate_article_table(self, articles: List[Dict[str, Any]], article_type: str) -> List[str]:
-        """Generate table for articles of a specific type."""
+    def _generate_article_list(self, articles: List[Dict[str, Any]], article_type: str) -> List[str]:
+        """Generate list for articles of a specific type."""
         lines = []
 
-        # Table header based on article type
-        if article_type == '政策文件':
-            lines.append('| 发布日期 | 标题 | 来源 | 摘要 | 链接 |')
-            lines.append('| :--- | :--- | :--- | :--- | :--- |')
-        elif article_type == '项目动态':
-            lines.append('| 发布日期 | 项目名称 | 类型 | 摘要 | 链接 |')
-            lines.append('| :--- | :--- | :--- | :--- | :--- |')
-        elif article_type in ['政策解读', '重要讲话', '改革发展', '时政新闻']:
-            lines.append('| 发布日期 | 标题 | 来源 | 摘要 | 链接 |')
-            lines.append('| :--- | :--- | :--- | :--- | :--- |')
-        else:
-            lines.append('| 发布日期 | 标题 | 来源 | 摘要 | 链接 |')
-            lines.append('| :--- | :--- | :--- | :--- | :--- |')
-
         for article in articles[:20]:  # Limit to 20 per type
+            title = article.get('title', '无标题')
             published = format_date(article.get('published', ''))
-            title = escape_md_table(article.get('title', ''))[:50]
-            source = escape_md_table(article.get('source', '未知'))
-            summary = truncate_text(strip_html_tags(article.get('content', '')), 60)
+            source = article.get('source', '未知')
+            # Get content from either 'content' or 'summary' field
+            content = article.get('content', '') or article.get('summary', '')
+            summary = truncate_text(strip_html_tags(content), 100)
             link = article.get('link', '')
 
-            # Shorten link for display
-            if link and len(link) > 40:
-                link_display = '...' + link[-37:]
-            else:
-                link_display = link
-
-            lines.append(f'| {published} | {title} | {source} | {summary} | [{link_display}]({link}) |')
+            lines.append(f' {title}')
+            lines.append('')
+            lines.append(f'- 📅 时间: {published}')
+            lines.append(f'- 🏛️ 来源: {source}')
+            if summary:
+                lines.append(f'- 📝 摘要: {summary}')
+            if link:
+                lines.append(f'- 🔗 链接: [查看原文]({link})')
+            lines.append('')
 
         return lines
 
@@ -410,7 +409,7 @@ class ReportGenerator:
             '',
             '📊 **统计信息**',
             f'- 总文章数: {self.stats["total"]}',
-            f'- 生成时间: {datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")}',
+            f'- 生成时间: {datetime.now(CHINA_TZ).strftime("%Y-%m-%d %H:%M:%S UTC+8")}',
             '',
             '**本报告由 `fin-pol-gov-news` 自动生成**',
             '**数据来源**: 深圳市政府、北京市政府、广东省政府、人民银行、金融监管总局官网、学习强国平台',

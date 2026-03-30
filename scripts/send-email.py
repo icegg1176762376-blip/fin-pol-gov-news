@@ -27,7 +27,7 @@ from urllib.request import Request, urlopen
 
 
 RESEND_API_BASE = "https://api.resend.com/emails"
-RESEND_USER_AGENT = "tech-news-digest/1.0"
+RESEND_USER_AGENT = "fin-pol-gov-news/1.0"
 
 
 def build_message(subject: str, from_addr: str, to_addrs: list,

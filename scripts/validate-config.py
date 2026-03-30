@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Configuration validation script for tech-news-digest.
+Configuration validation script for fin-pol-gov-news.
 
 Validates sources.json and topics.json against JSON Schema and performs
 additional consistency checks.
@@ -13,9 +13,8 @@ import json
 import argparse
 import logging
 import sys
-import os
 from pathlib import Path
-from typing import Dict, Any, Set
+from typing import Dict, Any
 
 try:
     import jsonschema
@@ -51,8 +50,8 @@ def validate_against_schema(data: Dict[str, Any], schema: Dict[str, Any],
                           config_type: str) -> bool:
     """Validate data against JSON schema."""
     if not HAS_JSONSCHEMA:
-        logging.warning("jsonschema not available, skipping schema validation")
-        return True
+        logging.error("jsonschema is not installed; schema validation cannot run")
+        return False
         
     try:
         # Extract the relevant schema definition
@@ -176,7 +175,7 @@ def validate_source_types(sources_data: Dict[str, Any]) -> bool:
 def main():
     """Main validation function."""
     parser = argparse.ArgumentParser(
-        description="Validate tech-news-digest configuration files",
+        description="Validate fin-pol-gov-news configuration files",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
@@ -217,7 +216,6 @@ Examples:
         sys.path.append(str(Path(__file__).parent))
         from config_loader import load_merged_sources, load_merged_topics
     
-    # File paths
     schema_path = Path("config/schema.json")
     
     if args.config:
@@ -235,10 +233,6 @@ Examples:
             defaults_dir = args.defaults
             config_dir = args.config
         
-        # Load schema
-        schema = load_json_file(schema_path)
-        logger.debug("Loaded schema.json")
-        
         # Load merged configuration data
         merged_sources = load_merged_sources(defaults_dir, config_dir)
         merged_topics = load_merged_topics(defaults_dir, config_dir)
@@ -252,7 +246,12 @@ Examples:
         # Perform validations
         all_valid = True
         
-        # Schema validation
+        if not schema_path.exists():
+            logger.error(f"Schema file not found at {schema_path}")
+            return 1
+
+        schema = load_json_file(schema_path)
+        logger.debug("Loaded schema.json")
         all_valid &= validate_against_schema(sources_data, schema, "sources")
         all_valid &= validate_against_schema(topics_data, schema, "topics")
         

@@ -1,0 +1,99 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "definitions": {
+    "source": {
+      "type": "object",
+      "required": ["id", "type", "enabled", "topics"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "type": {
+          "type": "string",
+          "enum": ["rss", "web", "twitter", "github", "reddit"]
+        },
+        "name": { "type": "string" },
+        "url": { "type": "string", "minLength": 1 },
+        "handle": { "type": "string", "minLength": 1 },
+        "repo": { "type": "string", "minLength": 1 },
+        "subreddit": { "type": "string", "minLength": 1 },
+        "enabled": { "type": "boolean" },
+        "priority": { "type": "boolean" },
+        "topics": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "expected_domains": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "note": { "type": "string" }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "type": { "const": "rss" } },
+            "required": ["type"]
+          },
+          "then": { "required": ["url"] }
+        },
+        {
+          "if": {
+            "properties": { "type": { "const": "twitter" } },
+            "required": ["type"]
+          },
+          "then": { "required": ["handle"] }
+        },
+        {
+          "if": {
+            "properties": { "type": { "const": "github" } },
+            "required": ["type"]
+          },
+          "then": { "required": ["repo"] }
+        },
+        {
+          "if": {
+            "properties": { "type": { "const": "reddit" } },
+            "required": ["type"]
+          },
+          "then": { "required": ["subreddit"] }
+        }
+      ]
+    },
+    "topic": {
+      "type": "object",
+      "required": ["id", "label", "search"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "emoji": { "type": "string" },
+        "label": { "type": "string", "minLength": 1 },
+        "description": { "type": "string" },
+        "search": {
+          "type": "object",
+          "required": ["queries", "must_include", "exclude"],
+          "properties": {
+            "queries": {
+              "type": "array",
+              "minItems": 1,
+              "items": { "type": "string", "minLength": 1 }
+            },
+            "must_include": {
+              "type": "array",
+              "items": { "type": "string", "minLength": 1 }
+            },
+            "exclude": {
+              "type": "array",
+              "items": { "type": "string", "minLength": 1 }
+            }
+          }
+        },
+        "display": {
+          "type": "object",
+          "properties": {
+            "max_items": { "type": "integer", "minimum": 1 },
+            "style": { "type": "string", "minLength": 1 }
+          }
+        }
+      }
+    }
+  }
+}
