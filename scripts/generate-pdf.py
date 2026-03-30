@@ -204,6 +204,14 @@ class MarkdownToHTML:
             )
             return
 
+        if stripped.startswith('#### '):
+            self._close_list_if_needed()
+            section = _process_inline(stripped[5:])
+            self.html_parts.append(
+                f'<h4 style="font-size:11.5pt;color:#4b5563;margin-top:16px;margin-bottom:6px">{section}</h4>'
+            )
+            return
+
         # Blockquote
         if stripped.startswith('> '):
             self._close_list_if_needed()
@@ -219,6 +227,10 @@ class MarkdownToHTML:
         if stripped == '---' or stripped == '***':
             self._close_list_if_needed()
             self.html_parts.append('<hr style="border:none;border-top:1px solid #e5e7eb;margin:28px 0">')
+            return
+
+        if len(stripped) >= 2 and stripped[0] in {'-', '*', '•'} and stripped[1] == ' ':
+            self._handle_list_item(stripped)
             return
 
         # Bullet items
@@ -390,6 +402,13 @@ h3 {
     color: #374151;
     margin-top: 20px;
     margin-bottom: 8px;
+}
+
+h4 {
+    font-size: 11.5pt;
+    color: #4b5563;
+    margin-top: 16px;
+    margin-bottom: 6px;
 }
 
 blockquote {

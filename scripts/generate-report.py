@@ -17,6 +17,7 @@ import json
 import logging
 import sys
 from datetime import datetime, timezone, timedelta
+from email.utils import parsedate_to_datetime
 from pathlib import Path
 from typing import Dict, List, Any, Optional
 from collections import defaultdict
@@ -131,13 +132,33 @@ def get_article_type(article: Dict[str, Any]) -> str:
     return '其他'
 
 
-def format_date(iso_date: str) -> str:
-    """Format ISO date string to readable format."""
+def parse_report_datetime(value: str) -> Optional[datetime]:
+    """Parse ISO or RFC 2822-style datetimes and normalize to China time."""
+    if not isinstance(value, str) or not value.strip():
+        return None
+
+    value = value.strip()
+
     try:
-        dt = datetime.fromisoformat(iso_date.replace('Z', '+00:00'))
-        return dt.strftime('%Y-%m-%d %H:%M')
+        dt = datetime.fromisoformat(value.replace('Z', '+00:00'))
     except Exception:
-        return iso_date[:19]
+        try:
+            dt = parsedate_to_datetime(value)
+        except Exception:
+            return None
+
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=CHINA_TZ)
+
+    return dt.astimezone(CHINA_TZ)
+
+
+def format_date(iso_date: str) -> str:
+    """Format ISO or RFC 2822-style date string to readable format."""
+    dt = parse_report_datetime(iso_date)
+    if dt is not None:
+        return dt.strftime('%Y-%m-%d %H:%M')
+    return (iso_date or '')[:19]
 
 
 def truncate_text(text: str, max_len: int = 200) -> str:

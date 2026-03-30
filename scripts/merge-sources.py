@@ -18,6 +18,7 @@ import logging
 import tempfile
 import re
 from datetime import datetime, timezone, timedelta
+from email.utils import parsedate_to_datetime
 from pathlib import Path
 from typing import Dict, List, Any, Optional, Set
 from difflib import SequenceMatcher
@@ -110,6 +111,27 @@ def normalize_url(url: str) -> str:
         return url
 
 
+def parse_article_datetime(value: str) -> Optional[datetime]:
+    """Parse ISO or RFC 2822-style datetimes and normalize to China time."""
+    if not isinstance(value, str) or not value.strip():
+        return None
+
+    value = value.strip()
+
+    try:
+        dt = datetime.fromisoformat(value.replace('Z', '+00:00'))
+    except Exception:
+        try:
+            dt = parsedate_to_datetime(value)
+        except Exception:
+            return None
+
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=CHINA_TZ)
+
+    return dt.astimezone(CHINA_TZ)
+
+
 def calculate_base_score(article: Dict[str, Any], source: Dict[str, Any]) -> float:
     """Calculate base quality score for an article."""
     score = 0.0
@@ -120,7 +142,9 @@ def calculate_base_score(article: Dict[str, Any], source: Dict[str, Any]) -> flo
         
     # Recency bonus (< 24 hours)
     try:
-        article_date = datetime.fromisoformat(article["date"].replace('Z', '+00:00'))
+        article_date = parse_article_datetime(article.get("date") or article.get("published", ""))
+        if not article_date:
+            raise ValueError("missing or invalid date")
         hours_old = (datetime.now(CHINA_TZ) - article_date).total_seconds() / 3600
         if hours_old < 24:
             score += SCORE_RECENT

@@ -21,6 +21,7 @@ import time
 import tempfile
 import re
 from datetime import datetime, timezone, timedelta
+from email.utils import parsedate_to_datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Dict, List, Any, Optional, Tuple
@@ -305,6 +306,32 @@ def filter_content(text: str, must_include: List[str], exclude: List[str]) -> bo
     return True
 
 
+def parse_result_date(date_str: str) -> Optional[datetime]:
+    """Parse search result dates from ISO or RFC 2822-like formats."""
+    if not date_str:
+        return None
+
+    value = date_str.strip()
+    if not value:
+        return None
+
+    try:
+        dt = datetime.fromisoformat(value.replace('Z', '+00:00'))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
+    except (ValueError, AttributeError):
+        pass
+
+    try:
+        dt = parsedate_to_datetime(value)
+        if dt and dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
+    except (TypeError, ValueError, IndexError):
+        return None
+
+
 def classify_filter_rejection(result: Dict[str, Any], cutoff: datetime,
                               must_include: List[str], exclude: List[str]) -> Optional[str]:
     """Return a rejection reason if a result should be filtered out."""
@@ -312,9 +339,8 @@ def classify_filter_rejection(result: Dict[str, Any], cutoff: datetime,
     if not date_str:
         return "missing_date"
 
-    try:
-        pub_date = datetime.fromisoformat(date_str.replace('Z', '+00:00'))
-    except (ValueError, AttributeError):
+    pub_date = parse_result_date(date_str)
+    if pub_date is None:
         return "invalid_date"
 
     if pub_date < cutoff:
