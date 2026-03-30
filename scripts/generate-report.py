@@ -320,12 +320,7 @@ class ReportGenerator:
         scored_articles.sort(key=lambda x: (x[0], x[1]), reverse=True)
         top_articles = [a for _, _, a in scored_articles[:5]]
 
-        lines = [
-            '## 🔥 核心焦点 (Top 5)',
-            '',
-            '| 排名 | 标题 | 来源 | 类型 | 发布时间 | 摘要 |',
-            '| :--- | :--- | :--- | :--- | :--- | :--- |',
-        ]
+        lines = ['## 🔥 核心焦点 (Top 5)', '']
 
         for i, article in enumerate(top_articles, 1):
             title = escape_md_table(article.get('title', ''))[:60]
@@ -334,7 +329,12 @@ class ReportGenerator:
             published = format_date(article.get('published', ''))
             summary = truncate_text(strip_html_tags(article.get('content', '')), 80)
 
-            lines.append(f'| **{i}** | **{title}** | {source} | {article_type} | {published} | {summary} |')
+            lines.append(f'- **{i}. {title}**')
+            lines.append(f'  - 📅 时间：{published}')
+            lines.append(f'  - 🏛️ 来源：{source}')
+            lines.append(f'  - 📝 类型：{article_type}')
+            lines.append(f'  - 📝 摘要：{summary}')
+            lines.append('')
 
         return lines
 
