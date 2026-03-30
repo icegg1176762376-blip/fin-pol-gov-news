@@ -15,8 +15,9 @@ Expected behavior:
 - fetch RSS and web as needed
 - review raw results before merge
 - merge into a candidate set
-- use AI to prioritize and comment
-- produce markdown only after editorial review
+- selectively enrich only when top items need deeper reading
+- use AI to prioritize, normalize, and comment
+- produce markdown directly from merged and enriched data
 
 ## 2. Debug a missing source or weak coverage
 

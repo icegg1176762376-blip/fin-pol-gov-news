@@ -61,17 +61,11 @@ Use `scripts/merge-sources.py` to:
 
 Do not treat merge output as the final report. Treat it as a ranked candidate set for editorial review.
 
-### 5. Pause for editorial review
+### 5. Enrich only the highest-value items
 
-After merge, the agent should decide:
-- what the top developments are
-- which items are routine notices rather than meaningful policy signals
-- what themes connect the day's developments
-- what deserves brief commentary or impact framing
+After merge, review the candidate set and enrich only the items that need deeper reading before commentary.
 
 Use `scripts/summarize-merged.py` if the merged JSON is too large to inspect directly.
-
-### 6. Enrich only the highest-value items
 
 Use `scripts/enrich-articles.py` when the merged summary is insufficient and a few top items need more context from article body text.
 
@@ -79,23 +73,36 @@ Do not enrich everything by default. Use it selectively for:
 - top policy items
 - ambiguous but potentially important announcements
 - articles where the title/snippet is too shallow to support commentary
+- items whose title, source label, or attribution look incomplete and need article-body confirmation
 
-### 7. Draft the report with AI-led synthesis
+### 6. Generate the report directly with AI
 
-The agent writes the real report. Scripts can help with formatting, but the agent must still:
-- choose the lead items
-- explain why they matter
-- compress routine items
-- preserve links and source attribution
+The default path is now:
+- fetch
+- merge
+- enrich
+- AI report synthesis
 
-Use `scripts/generate-report.py` only when its markdown structure helps as a starting point or output formatter. It should not replace editorial judgment.
+The agent should read the merged and enriched data, then write the actual report from scratch using the reference template in `references/report-template.md`.
+For stricter execution rules around input fields, normalization, commentary, time display, and no-guessing behavior, follow `references/report-generation-spec.md`.
 
-Important:
-- `--input` must be the merged JSON produced by `scripts/merge-sources.py`
-- `--rss-input` and `--web-input` are optional side inputs for empty-section diagnostics only
-- region sections are generated inside `generate-report.py`; the merged JSON does not need to be pre-grouped by region
+The agent, not a formatter script, is responsible for:
+- choosing the lead items
+- explaining why they matter
+- compressing routine notices
+- grouping related developments into themes
+- preserving links and source attribution
+- normalizing incomplete or awkward titles when the underlying article text supports a clearer title
+- normalizing source names when the feed label is too short, noisy, or inconsistent
+- filling in missing summaries from the available snippet or enriched article text
+- flagging uncertainty instead of guessing when the source material is incomplete
 
-### 8. Prepare delivery outputs only after the report is done
+Treat AI-generated normalization conservatively:
+- do not invent facts that are not present in the source text
+- do not upgrade weak signals into confirmed policy conclusions
+- when title, date, or source attribution is ambiguous, say so explicitly
+
+### 7. Prepare delivery outputs only after the report is done
 
 Use:
 - `scripts/sanitize-html.py` to convert markdown to safe HTML email
@@ -104,7 +111,7 @@ Use:
 
 These are publishing tools, not analysis tools.
 
-### 9. Preferred email delivery path
+### 8. Preferred email delivery path
 
 When the user wants email delivery, the preferred path is:
 
@@ -132,19 +139,9 @@ Resend configuration:
 - set `RESEND_API_KEY` or pass `--resend-api-key`
 - set `RESEND_FROM` or pass `--from`
 
-## Legacy automation
-
-`scripts/run-pipeline.py` still exists as a convenience wrapper for unattended or historical runs:
-- fetch RSS
-- fetch web
-- merge
-- write meta
-
-Do not use it as the default skill path unless the user explicitly asks for one-command automation or scheduled batch behavior.
-
 ## Decision guide
 
-- If the user asks for "what happened today" or "produce a brief": collect, review, merge, editorial review, report.
+- If the user asks for "what happened today" or "produce a brief": collect, review, merge, enrich the top items if needed, then write the report directly with AI.
 - If the user asks "why is source X missing": validate config, fetch narrowly, inspect raw output, then merge only if needed.
 - If the user asks to improve ranking or classification: inspect `merge-sources.py`, then test with saved outputs.
-- If the user asks to change final format or distribution: focus on `generate-report.py`, `sanitize-html.py`, `generate-pdf.py`, and `send-email.py`.
+- If the user asks to change final format or distribution: focus first on `references/report-template.md`, then `sanitize-html.py`, `generate-pdf.py`, and `send-email.py`.

@@ -85,17 +85,6 @@ Read when the issue is about defaults versus user overlay behavior or why a sour
 
 ## Reporting and publishing
 
-### `scripts/generate-report.py`
-
-Use to turn merged JSON into markdown when you want a structured draft or a project-native report format.
-
-The agent should still decide the editorial angle and final emphasis.
-
-Invocation notes:
-- `--input` is required and must point to merged output from `merge-sources.py`
-- `--rss-input` and `--web-input` are optional helpers for explaining why a region is empty
-- do not pass only raw RSS or Web files and expect report generation to work
-
 ### `scripts/sanitize-html.py`
 
 Use to convert markdown into safe HTML for email delivery.
@@ -116,10 +105,3 @@ Typical flow:
 - `generate-pdf.py` optionally creates an attachment
 - `send-email.py --provider resend` sends the HTML body and optional PDF
 
-## Legacy wrapper
-
-### `scripts/run-pipeline.py`
-
-Use only when the user explicitly wants one-command automation, unattended execution, or backward-compatible behavior.
-
-Not recommended as the default agent path because it reduces opportunities for AI review between stages.
