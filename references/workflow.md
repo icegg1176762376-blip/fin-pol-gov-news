@@ -14,6 +14,12 @@ Use `scripts/validate-config.py` when:
 - a new source/topic is being added
 
 Read `scripts/config_loader.py` when the issue is about overlay behavior or precedence between defaults and user config.
+Use `scripts/check-env.py` when API-backed scripts cannot see expected credentials from shell config, OpenClaw config, or `.env`.
+
+Recommended setup:
+- copy `.env.example` to `.env` in the project root
+- fill in only the keys needed for your workflow
+- run `python scripts/check-env.py` before debugging backend-specific failures
 
 ### 2. Collect only the needed raw candidates
 
@@ -90,6 +96,34 @@ Use:
 - `scripts/send-email.py` to send the result
 
 These are publishing tools, not analysis tools.
+
+### 9. Preferred email delivery path
+
+When the user wants email delivery, the preferred path is:
+
+1. Finalize the markdown brief.
+2. Convert markdown to HTML with `scripts/sanitize-html.py`.
+3. Optionally generate a PDF with `scripts/generate-pdf.py`.
+4. Send the HTML body with `scripts/send-email.py`, preferably through Resend when configured.
+
+Example:
+
+```bash
+python scripts/sanitize-html.py --input tmp/report.md --output tmp/report.html
+python scripts/generate-pdf.py --input tmp/report.md --output tmp/report.pdf
+python scripts/send-email.py --provider resend --to user@example.com --subject "金融政策日报" --html tmp/report.html --attach tmp/report.pdf
+```
+
+Without a PDF attachment:
+
+```bash
+python scripts/sanitize-html.py --input tmp/report.md --output tmp/report.html
+python scripts/send-email.py --provider resend --to user@example.com --subject "金融政策日报" --html tmp/report.html
+```
+
+Resend configuration:
+- set `RESEND_API_KEY` or pass `--resend-api-key`
+- set `RESEND_FROM` or pass `--from`
 
 ## Legacy automation
 

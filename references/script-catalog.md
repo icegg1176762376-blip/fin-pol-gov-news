@@ -61,6 +61,18 @@ Use to monitor per-source reliability over time and spot chronically unhealthy i
 
 Use before or after editing source/topic configuration, or when coverage seems broken.
 
+### `scripts/check-env.py`
+
+Use to confirm which API credentials are actually visible to the current Python process.
+
+Best for:
+- diagnosing why `fetch-web.py` cannot see search API keys
+- diagnosing why `send-email.py` cannot see Resend credentials
+- checking whether a project `.env` file is being loaded
+
+Related file:
+- `.env.example` shows the supported environment variable names
+
 ### `scripts/config_loader.py`
 
 Read when the issue is about defaults versus user overlay behavior or why a source/topic did not resolve the way you expected.
@@ -84,6 +96,14 @@ Use to turn markdown into a styled PDF.
 ### `scripts/send-email.py`
 
 Use to send the final HTML email, optionally with a PDF attachment.
+
+Preferred provider for this skill:
+- `resend` when `RESEND_API_KEY` and sender configuration are available
+
+Typical flow:
+- `sanitize-html.py` converts markdown to HTML
+- `generate-pdf.py` optionally creates an attachment
+- `send-email.py --provider resend` sends the HTML body and optional PDF
 
 ## Legacy wrapper
 

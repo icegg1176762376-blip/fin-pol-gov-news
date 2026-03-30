@@ -30,6 +30,12 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Dict, Any, List
 
+try:
+    from env_utils import load_dotenv
+except ImportError:
+    sys.path.append(str(Path(__file__).parent))
+    from env_utils import load_dotenv
+
 SCRIPTS_DIR = Path(__file__).parent
 DEFAULT_TIMEOUT = 180
 
@@ -91,6 +97,7 @@ def run_step(name: str, script: str, args_list: list, output_path: Path, timeout
         }
 
 def main() -> int:
+    load_dotenv()
     parser = argparse.ArgumentParser(
         description="Run the fin-pol-gov-news data pipeline.",
         formatter_class=argparse.RawDescriptionHelpFormatter,

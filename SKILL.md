@@ -31,6 +31,7 @@ Use this skill to run an AI-led newsroom workflow. Do not default to a fully aut
 - For how to write summaries, significance notes, and policy commentary, read [editorial.md](/d:/Projects/fin-pol-gov-news/references/editorial.md).
 - For which script to use for which task, read [script-catalog.md](/d:/Projects/fin-pol-gov-news/references/script-catalog.md).
 - For concrete triggering examples and anti-examples, read [trigger-examples.md](/d:/Projects/fin-pol-gov-news/references/trigger-examples.md).
+- For realistic user-task phrasings and preferred agent behavior, read [prompt-examples.md](/d:/Projects/fin-pol-gov-news/references/prompt-examples.md).
 - For wording and formatting norms in the final brief, read [style-guide.md](/d:/Projects/fin-pol-gov-news/references/style-guide.md).
 
 ## Expected behavior
@@ -40,3 +41,4 @@ Use this skill to run an AI-led newsroom workflow. Do not default to a fully aut
 - Use `scripts/summarize-merged.py` to shrink large merged JSON before reasoning when helpful.
 - Use `scripts/enrich-articles.py` only for high-value items that need deeper reading.
 - Use delivery scripts only after the markdown report is editorially complete.
+- Prefer the delivery chain `sanitize-html.py` -> optional `generate-pdf.py` -> `send-email.py --provider resend` when the user wants email distribution.

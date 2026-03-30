@@ -28,6 +28,12 @@ from urllib.request import urlopen, Request
 from urllib.error import HTTPError
 from urllib.parse import urlencode
 
+try:
+    from env_utils import load_dotenv
+except ImportError:
+    sys.path.append(str(Path(__file__).parent))
+    from env_utils import load_dotenv
+
 # China Standard Time (UTC+8)
 CHINA_TZ = timezone(timedelta(hours=8))
 
@@ -553,6 +559,7 @@ def convert_freshness(hours: int) -> str:
 
 def main():
     """Main web search function."""
+    load_dotenv()
     parser = argparse.ArgumentParser(
         description="Perform web searches for fin-pol-gov-news topics. "
                    "Can use Brave Search API (BRAVE_API_KEY) or generate interface for agents.",

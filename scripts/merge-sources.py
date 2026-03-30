@@ -23,6 +23,9 @@ from typing import Dict, List, Any, Optional, Set
 from difflib import SequenceMatcher
 from urllib.parse import urlparse
 
+# China Standard Time (UTC+8)
+CHINA_TZ = timezone(timedelta(hours=8))
+
 # Quality scoring weights
 SCORE_MULTI_SOURCE = 5      # Article appears in multiple sources
 SCORE_PRIORITY_SOURCE = 3   # From high-priority source

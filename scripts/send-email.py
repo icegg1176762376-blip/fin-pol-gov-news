@@ -25,6 +25,12 @@ from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
+try:
+    from env_utils import load_dotenv
+except ImportError:
+    sys.path.append(str(Path(__file__).parent))
+    from env_utils import load_dotenv
+
 
 RESEND_API_BASE = "https://api.resend.com/emails"
 RESEND_USER_AGENT = "fin-pol-gov-news/1.0"
@@ -159,6 +165,7 @@ def send_via_sendmail(message: str, to_addrs: list) -> bool:
 
 
 def main():
+    load_dotenv()
     parser = argparse.ArgumentParser(
         description="Send HTML email with optional PDF attachment",
         formatter_class=argparse.RawDescriptionHelpFormatter,
