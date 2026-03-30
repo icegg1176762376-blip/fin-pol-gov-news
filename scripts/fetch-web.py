@@ -287,23 +287,17 @@ def search_brave(query: str, api_key: str, freshness: Optional[str] = None) -> D
     }
 
 
-def filter_content(text: str, must_include: List[str], exclude: List[str]) -> bool:
-    """Check if content matches inclusion/exclusion criteria."""
+def analyze_keyword_signals(text: str, must_include: List[str], exclude: List[str]) -> Dict[str, Any]:
+    """Treat topic keyword rules as soft signals rather than hard filters."""
     text_lower = text.lower()
-
-    # Check must_include (any match)
-    if must_include:
-        has_required = any(keyword.lower() in text_lower for keyword in must_include)
-        if not has_required:
-            return False
-
-    # Check exclude (any match disqualifies)
-    if exclude:
-        has_excluded = any(keyword.lower() in text_lower for keyword in exclude)
-        if has_excluded:
-            return False
-            
-    return True
+    matched_must_include = [keyword for keyword in must_include if keyword.lower() in text_lower]
+    matched_exclude = [keyword for keyword in exclude if keyword.lower() in text_lower]
+    return {
+        "matched_must_include": matched_must_include,
+        "matched_exclude": matched_exclude,
+        "has_positive_signal": bool(matched_must_include),
+        "has_negative_signal": bool(matched_exclude),
+    }
 
 
 def parse_result_date(date_str: str) -> Optional[datetime]:
@@ -332,9 +326,8 @@ def parse_result_date(date_str: str) -> Optional[datetime]:
         return None
 
 
-def classify_filter_rejection(result: Dict[str, Any], cutoff: datetime,
-                              must_include: List[str], exclude: List[str]) -> Optional[str]:
-    """Return a rejection reason if a result should be filtered out."""
+def classify_filter_rejection(result: Dict[str, Any], cutoff: datetime) -> Optional[str]:
+    """Return a rejection reason when a result fails hard freshness/date checks."""
     date_str = result.get("date", "")
     if not date_str:
         return "missing_date"
@@ -345,14 +338,6 @@ def classify_filter_rejection(result: Dict[str, Any], cutoff: datetime,
 
     if pub_date < cutoff:
         return "too_old"
-
-    combined_text = f"{result.get('title', '')} {result.get('snippet', '')}".lower()
-
-    if must_include and not any(keyword.lower() in combined_text for keyword in must_include):
-        return "missing_must_include"
-
-    if exclude and any(keyword.lower() in combined_text for keyword in exclude):
-        return "matched_exclude"
 
     return None
 
@@ -372,16 +357,19 @@ def build_review_candidate(result: Dict[str, Any], reason: str) -> Dict[str, Any
 def build_filter_diagnostics(topic_id: str, must_include: List[str], exclude: List[str],
                              raw_results_total: int, accepted_count: int,
                              rejection_counts: Dict[str, int],
-                             review_candidates: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """Build structured diagnostics for empty or heavily filtered topics."""
+                             review_candidates: List[Dict[str, Any]],
+                             signal_counts: Dict[str, int]) -> Dict[str, Any]:
+    """Build structured diagnostics for freshness filtering and soft keyword signals."""
     return {
         "topic_id": topic_id,
         "raw_results_total": raw_results_total,
         "accepted_results": accepted_count,
         "rejection_counts": rejection_counts,
+        "keyword_signal_counts": signal_counts,
         "filters": {
             "must_include": must_include,
             "exclude": exclude,
+            "mode": "soft_keywords_hard_freshness",
         },
         "review_candidates": review_candidates[:5],
     }
@@ -411,8 +399,11 @@ def search_topic_brave(topic: Dict[str, Any], api_key: str, freshness: Optional[
         "missing_date": 0,
         "invalid_date": 0,
         "too_old": 0,
-        "missing_must_include": 0,
-        "matched_exclude": 0,
+    }
+    signal_counts = {
+        "positive_signal": 0,
+        "negative_signal": 0,
+        "neutral_signal": 0,
     }
     review_candidates: List[Dict[str, Any]] = []
     
@@ -429,8 +420,17 @@ def search_topic_brave(topic: Dict[str, Any], api_key: str, freshness: Optional[
                 if search_result['status'] == 'ok':
                     raw_results_total += len(search_result['results'])
                     for result in search_result['results']:
-                        reason = classify_filter_rejection(result, cutoff, must_include, exclude)
+                        reason = classify_filter_rejection(result, cutoff)
                         if reason is None:
+                            combined_text = f"{result.get('title', '')} {result.get('snippet', '')}"
+                            signals = analyze_keyword_signals(combined_text, must_include, exclude)
+                            if signals["has_positive_signal"]:
+                                signal_counts["positive_signal"] += 1
+                            elif signals["has_negative_signal"]:
+                                signal_counts["negative_signal"] += 1
+                            else:
+                                signal_counts["neutral_signal"] += 1
+                            result["filter_signals"] = signals
                             result['topics'] = [topic_id]
                             all_results.append(result)
                         else:
@@ -448,8 +448,17 @@ def search_topic_brave(topic: Dict[str, Any], api_key: str, freshness: Optional[
             if search_result['status'] == 'ok':
                 raw_results_total += len(search_result['results'])
                 for result in search_result['results']:
-                    reason = classify_filter_rejection(result, cutoff, must_include, exclude)
+                    reason = classify_filter_rejection(result, cutoff)
                     if reason is None:
+                        combined_text = f"{result.get('title', '')} {result.get('snippet', '')}"
+                        signals = analyze_keyword_signals(combined_text, must_include, exclude)
+                        if signals["has_positive_signal"]:
+                            signal_counts["positive_signal"] += 1
+                        elif signals["has_negative_signal"]:
+                            signal_counts["negative_signal"] += 1
+                        else:
+                            signal_counts["neutral_signal"] += 1
+                        result["filter_signals"] = signals
                         result['topics'] = [topic_id]
                         all_results.append(result)
                     else:
@@ -460,7 +469,7 @@ def search_topic_brave(topic: Dict[str, Any], api_key: str, freshness: Optional[
 
     diagnostics = build_filter_diagnostics(
         topic_id, must_include, exclude, raw_results_total, len(all_results),
-        rejection_counts, review_candidates
+        rejection_counts, review_candidates, signal_counts
     )
     status = 'ok'
     if raw_results_total > 0 and not all_results:
@@ -568,8 +577,11 @@ def search_topic_tavily(topic: Dict[str, Any], api_key: str, days: Optional[int]
         "missing_date": 0,
         "invalid_date": 0,
         "too_old": 0,
-        "missing_must_include": 0,
-        "matched_exclude": 0,
+    }
+    signal_counts = {
+        "positive_signal": 0,
+        "negative_signal": 0,
+        "neutral_signal": 0,
     }
     review_candidates: List[Dict[str, Any]] = []
 
@@ -583,8 +595,17 @@ def search_topic_tavily(topic: Dict[str, Any], api_key: str, days: Optional[int]
         if search_result["status"] == "ok":
             raw_results_total += len(search_result["results"])
             for result in search_result["results"]:
-                reason = classify_filter_rejection(result, cutoff, must_include, exclude)
+                reason = classify_filter_rejection(result, cutoff)
                 if reason is None:
+                    combined_text = f"{result.get('title', '')} {result.get('snippet', '')}"
+                    signals = analyze_keyword_signals(combined_text, must_include, exclude)
+                    if signals["has_positive_signal"]:
+                        signal_counts["positive_signal"] += 1
+                    elif signals["has_negative_signal"]:
+                        signal_counts["negative_signal"] += 1
+                    else:
+                        signal_counts["neutral_signal"] += 1
+                    result["filter_signals"] = signals
                     result["topics"] = [topic_id]
                     all_results.append(result)
                 else:
@@ -610,7 +631,7 @@ def search_topic_tavily(topic: Dict[str, Any], api_key: str, days: Optional[int]
         "query_details": query_stats,
         "diagnostics": build_filter_diagnostics(
             topic_id, must_include, exclude, raw_results_total, len(all_results),
-            rejection_counts, review_candidates
+            rejection_counts, review_candidates, signal_counts
         ),
     }
 
@@ -633,7 +654,8 @@ def generate_search_interface(topic: Dict[str, Any]) -> Dict[str, Any]:
         },
         'instructions': [
             f"Use web_search tool for each query in 'queries' list",
-            f"Filter results using 'filters.must_include' and 'filters.exclude'",
+            f"Keep the 48-hour freshness requirement as the hard filter",
+            f"Treat 'filters.must_include' and 'filters.exclude' as ranking hints for AI review, not strict rejection rules",
             f"Tag matching articles with topic: '{topic_id}'",
             f"Expected max results per query: {MAX_RESULTS_PER_QUERY}"
         ],
@@ -905,7 +927,8 @@ Examples:
                 "agent_instructions": [
                     "This file contains search interface for web_search tool",
                     "For each topic, execute the queries using web_search",
-                    "Apply the filters (must_include/exclude) to results",
+                    "Apply the 48-hour freshness requirement as the hard filter",
+                    "Treat must_include/exclude as soft relevance hints for AI review",
                     "Tag matching articles with the topic_id",
                     "Update this file with results for merge-sources.py"
                 ]

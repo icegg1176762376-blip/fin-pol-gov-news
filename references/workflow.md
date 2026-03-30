@@ -29,7 +29,7 @@ Use `scripts/fetch-web.py` when search-based coverage is needed for topics that 
 
 Do not automatically run both if the task is narrow. Prefer targeted collection.
 
-If `fetch-web.py` returns `status: "filtered_empty"` for a topic, do not treat that as a search backend failure. It means raw results were found but the topic filters excluded them. Inspect the topic diagnostics and review candidates before changing queries or giving up on the topic.
+If `fetch-web.py` returns `status: "filtered_empty"` for a topic, do not treat that as a search backend failure. It means raw results were found but the hard freshness/date checks excluded them. Keyword rules are now soft signals for ranking and review, not hard rejection rules.
 
 Save intermediate outputs explicitly, for example:
 
@@ -89,6 +89,11 @@ The agent writes the real report. Scripts can help with formatting, but the agen
 - preserve links and source attribution
 
 Use `scripts/generate-report.py` only when its markdown structure helps as a starting point or output formatter. It should not replace editorial judgment.
+
+Important:
+- `--input` must be the merged JSON produced by `scripts/merge-sources.py`
+- `--rss-input` and `--web-input` are optional side inputs for empty-section diagnostics only
+- region sections are generated inside `generate-report.py`; the merged JSON does not need to be pre-grouped by region
 
 ### 8. Prepare delivery outputs only after the report is done
 

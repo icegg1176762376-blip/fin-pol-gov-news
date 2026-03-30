@@ -26,7 +26,8 @@ May use Tavily, Brave, or generate a search interface depending on environment.
 
 When a topic returns `status: "filtered_empty"`, read its `diagnostics` block:
 - `raw_results_total` shows whether search found anything
-- `rejection_counts` shows why items were filtered out
+- `rejection_counts` shows why items failed hard date/freshness checks
+- `keyword_signal_counts` shows how many accepted items matched positive or negative topic keywords
 - `review_candidates` gives a small sample for AI inspection
 
 ### `scripts/merge-sources.py`
@@ -89,6 +90,11 @@ Read when the issue is about defaults versus user overlay behavior or why a sour
 Use to turn merged JSON into markdown when you want a structured draft or a project-native report format.
 
 The agent should still decide the editorial angle and final emphasis.
+
+Invocation notes:
+- `--input` is required and must point to merged output from `merge-sources.py`
+- `--rss-input` and `--web-input` are optional helpers for explaining why a region is empty
+- do not pass only raw RSS or Web files and expect report generation to work
 
 ### `scripts/sanitize-html.py`
 

@@ -554,12 +554,18 @@ def escape_md_table(text: str) -> str:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Generate detailed markdown report from merged JSON data"
+        description="Generate detailed markdown report from merged JSON data. "
+                    "--input must point to merged output from merge-sources.py; "
+                    "--rss-input and --web-input are optional diagnostics only."
     )
-    parser.add_argument("--input", "-i", required=True, type=Path, help="Input JSON file")
-    parser.add_argument("--output", "-o", required=True, type=Path, help="Output markdown file")
-    parser.add_argument("--rss-input", type=Path, help="Optional RSS raw output JSON for empty-state diagnostics")
-    parser.add_argument("--web-input", type=Path, help="Optional Web raw output JSON for empty-state diagnostics")
+    parser.add_argument("--input", "-i", required=True, type=Path,
+                        help="Required merged JSON from merge-sources.py")
+    parser.add_argument("--output", "-o", required=True, type=Path,
+                        help="Output markdown report path")
+    parser.add_argument("--rss-input", type=Path,
+                        help="Optional raw rss.json used only to explain empty sections")
+    parser.add_argument("--web-input", type=Path,
+                        help="Optional raw web.json used only to explain empty sections")
     parser.add_argument("--verbose", "-v", action="store_true")
     args = parser.parse_args()
 
